@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PrivateMessage", "Nogrod", "2.0.0", ResourceId = 659)]
+    [Info("PrivateMessage", "Nogrod", "2.0.1", ResourceId = 659)]
     class PrivateMessage : RustPlugin
     {
         private readonly Dictionary<ulong, ulong> pmHistory = new Dictionary<ulong, ulong>();
@@ -25,6 +25,7 @@ namespace Oxide.Plugins
                 {"NotOnlineAnymore", "The last person you was talking to is not online anymore."},
                 {"NotMessaged", "You haven't messaged anyone or they haven't messaged you."},
                 {"IgnoreYou", "<color=red>{0} is ignoring you and cant recieve your PMs</color>"},
+                {"SelfPM", "You can not send messages to yourself."},
                 {"SyntaxR", "Incorrect Syntax use: /r <msg>"},
                 {"SyntaxPM", "Incorrect Syntax use: /pm <name> <msg>"}
             }, this);
@@ -45,6 +46,11 @@ namespace Oxide.Plugins
                 for (var i = 1; i < args.Length; i++)
                     msg = $"{msg} {args[i]}";
                 var p = FindPlayer(name);
+                if (p == player)
+                {
+                    PrintMessage(player, "SelfPM");
+                    return;
+                }
                 if (p != null)
                 {
                     var hasIgnore = Ignore?.CallHook("HasIgnored", p.userID, player.userID);

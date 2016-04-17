@@ -18,10 +18,10 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("LootConfig", "Nogrod", "1.0.10")]
+    [Info("LootConfig", "Nogrod", "1.0.11")]
     internal class LootConfig : RustPlugin
     {
-        private const int VersionConfig = 6;
+        private const int VersionConfig = 7;
         private readonly FieldInfo ParentSpawnGroupField = typeof (SpawnPointInstance).GetField("parentSpawnGroup", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnGroupsField = typeof (SpawnHandler).GetField("SpawnGroups", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnPointsField = typeof(SpawnGroup).GetField("spawnPoints", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -412,7 +412,10 @@ namespace Oxide.Plugins
             container.destroyOnEmpty = containerConfig.DestroyOnEmpty;
             container.distributeFragments = containerConfig.DistributeFragments;
             container.lootDefinition = GetLootSpawn(containerConfig.LootDefinition, lootSpawns);
+            container.inventorySlots = containerConfig.InventorySlots;
+            container.SpawnType = containerConfig.SpawnType;
             if (!container.gameObject.activeInHierarchy) return;
+            container.inventory.capacity = containerConfig.InventorySlots;
             container.CancelInvoke("SpawnLoot");
             container.SpawnLoot();
         }
@@ -733,7 +736,9 @@ namespace Oxide.Plugins
                 writer.WritePropertyName("InitialLootSpawn");
                 writer.WriteValue(container.initialLootSpawn);
                 writer.WritePropertyName("SpawnType");
-                writer.WriteValue(container.SpawnType);
+                writer.WriteValue(container.SpawnType.ToString());
+                writer.WritePropertyName("InventorySlots");
+                writer.WriteValue(container.inventorySlots);
                 writer.WriteEndObject();
             }
 
@@ -760,6 +765,8 @@ namespace Oxide.Plugins
             public float MinSecondsBetweenRefresh { get; set; } = 3600f;
             public float MaxSecondsBetweenRefresh { get; set; } = 7200f;
             public bool DistributeFragments { get; set; } = true;
+            public LootContainer.spawnType SpawnType { get; set; }
+            public int InventorySlots { get; set; }
         }
 
         #endregion

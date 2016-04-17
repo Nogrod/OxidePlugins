@@ -8,7 +8,7 @@ using static UnityEngine.Vector3;
 
 namespace Oxide.Plugins
 {
-    [Info("PathFinding", "Reneb / Nogrod", "1.0.0")]
+    [Info("PathFinding", "Reneb / Nogrod", "1.0.1")]
     public class PathFinding : RustPlugin
     {
         private static readonly Vector3 Up = up;
@@ -79,7 +79,10 @@ namespace Oxide.Plugins
                         }
                     }
                     if (closedList.Count > MaxDepth)
+                    {
+                        Interface.Oxide.LogWarning("[PathFinding] Hit MaxDepth!");
                         break;
+                    }
                 }
                 Clear();
                 return null;

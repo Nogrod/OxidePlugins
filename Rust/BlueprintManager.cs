@@ -14,7 +14,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("BlueprintManager", "Nogrod", "1.2.0", ResourceId = 833)]
+    [Info("BlueprintManager", "Nogrod", "1.2.1", ResourceId = 833)]
     class BlueprintManager : RustPlugin
     {
         private Dictionary<string, string> _itemShortname;
@@ -48,6 +48,25 @@ namespace Oxide.Plugins
             }
             _giveBps = new List<ItemDefinition>(tmp);
 
+            bps = GetConfig("blockedDefaultBps", new List<object>()).ConvertAll(Convert.ToString);
+            var blockedTmp = new HashSet<int>();
+            foreach (var bp in bps)
+            {
+                var name = bp.ToLower();
+                if (_itemShortname.ContainsKey(name))
+                    name = _itemShortname[name];
+                var definition = ItemManager.FindItemDefinition(name);
+                if (definition == null)
+                {
+                    Puts("Item does not exist: {0}", name);
+                    continue;
+                }
+                blockedTmp.Add(definition.itemid);
+            }
+            var defaultBlueprints = new List<int>(ItemManager.defaultBlueprints);
+            defaultBlueprints.RemoveAll(b => blockedTmp.Contains(b));
+            ItemManager.defaultBlueprints = defaultBlueprints.ToArray();
+
             var file = Interface.Oxide.DataFileSystem.GetFile($"{nameof(BlueprintManager)}_{GetConfig("rememberProtocol", Protocol.network - 1)}");
             if (file.Exists())
                 playerLearned = file.ReadObject<Dictionary<ulong, HashSet<string>>>();
@@ -65,6 +84,7 @@ namespace Oxide.Plugins
             GetConfig("authLevelOther", 2);
             GetConfig("giveOnConnect", false);
             GetConfig("bps", new List<object>());
+            GetConfig("blockedDefaultBps", new List<object>());
             GetConfig("rememberProtocol", Protocol.network - 1);
         }
 
@@ -558,7 +578,7 @@ namespace Oxide.Plugins
             var player = FindPlayer(persistentPlayerId.ToString());
             foreach (var itemDef in itemDefs)
             {
-                if (playerInfo.blueprints.complete.Contains(itemDef.itemid)) continue;
+                if (ItemManager.defaultBlueprints.Contains(itemDef.itemid) || playerInfo.blueprints.complete.Contains(itemDef.itemid)) continue;
                 learned = true;
                 playerInfo.blueprints.complete.Add(itemDef.itemid);
                 if (player?.net == null) continue;

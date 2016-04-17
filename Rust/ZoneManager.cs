@@ -20,7 +20,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("ZoneManager", "Reneb / Nogrod", "2.4.2", ResourceId = 739)]
+    [Info("ZoneManager", "Reneb / Nogrod", "2.4.3", ResourceId = 739)]
     public class ZoneManager : RustPlugin
     {
         private const string PermZone = "zonemanager.zone";
@@ -318,7 +318,7 @@ namespace Oxide.Plugins
                         var items = player.inventory.containerWear.itemList;
                         foreach (var item in items)
                         {
-                            if (!item.info.shortname.Equals("hat.miner")) continue;
+                            if (!item.info.shortname.Equals("hat.miner") && !item.info.shortname.Equals("hat.candle")) continue;
                             item.SwitchOnOff(false, player);
                             player.inventory.ServerUpdate(0f);
                             break;
@@ -348,7 +348,7 @@ namespace Oxide.Plugins
                         var items = player.inventory.containerWear.itemList;
                         foreach (var item in items)
                         {
-                            if (!item.info.shortname.Equals("hat.miner")) continue;
+                            if (!item.info.shortname.Equals("hat.miner") && !item.info.shortname.Equals("hat.candle")) continue;
                             if (item.contents == null) item.contents = new ItemContainer();
                             var array = item.contents.itemList.ToArray();
                             for (var i = 0; i < array.Length; i++)
@@ -835,6 +835,8 @@ namespace Oxide.Plugins
                         CancelDamage(hitinfo);
                 }
                 else if (HasPlayerFlag(player, ZoneFlags.PveGod))
+                    CancelDamage(hitinfo);
+                else if (hitinfo.Initiator is FireBall && HasPlayerFlag(player, ZoneFlags.PvpGod))
                     CancelDamage(hitinfo);
                 return;
             }
@@ -1662,13 +1664,12 @@ namespace Oxide.Plugins
         private static void EjectPlayer(Zone zone, BasePlayer player)
         {
             if (isAdmin(player) || zone.WhiteList.Contains(player.userID) || zone.KeepInList.Contains(player.userID)) return;
-            var cachedDirection = player.transform.position - zone.transform.position;
             float dist;
             if (zone.Info.Size != Vector3.zero)
                 dist = zone.Info.Size.x > zone.Info.Size.z ? zone.Info.Size.x : zone.Info.Size.z;
             else
                 dist = zone.Info.radius;
-            var newPos = zone.transform.position + (cachedDirection / cachedDirection.magnitude * (dist + 5f));
+            var newPos = zone.transform.position + (player.transform.position - zone.transform.position).normalized * (dist + 5f);
             newPos.y = TerrainMeta.HeightMap.GetHeight(newPos);
             player.MovePosition(newPos);
             player.ClientRPCPlayer(null, player, "ForcePositionTo", player.transform.position);
@@ -1678,13 +1679,12 @@ namespace Oxide.Plugins
 
         private static void AttractPlayer(Zone zone, BasePlayer player)
         {
-            var cachedDirection = player.transform.position - zone.transform.position;
             float dist;
             if (zone.Info.Size != Vector3.zero)
                 dist = zone.Info.Size.x > zone.Info.Size.z ? zone.Info.Size.x : zone.Info.Size.z;
             else
                 dist = zone.Info.radius;
-            var newPos = zone.transform.position + (cachedDirection / cachedDirection.magnitude * (dist - 5f));
+            var newPos = zone.transform.position + (player.transform.position - zone.transform.position).normalized * (dist - 5f);
             newPos.y = TerrainMeta.HeightMap.GetHeight(newPos);
             player.MovePosition(newPos);
             player.ClientRPCPlayer(null, player, "ForcePositionTo", player.transform.position);

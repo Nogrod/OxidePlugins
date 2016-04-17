@@ -13,12 +13,13 @@ using Newtonsoft.Json.Linq;
 using Oxide.Core;
 using Oxide.Core.Configuration;
 using Oxide.Core.Plugins;
+using Oxide.Game.Rust;
 
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("NTeleportation", "Nogrod", "1.0.2", ResourceId = 17304)]
+    [Info("NTeleportation", "Nogrod", "1.0.4", ResourceId = 1832)]
     class NTeleportation : RustPlugin
     {
         private const string NewLine = "\n";
@@ -37,7 +38,8 @@ namespace Oxide.Plugins
         private bool changedTown;
         private ConfigData configData;
         private float boundary;
-        private readonly int groundLayer = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed");
+        private readonly int groundLayer = LayerMask.GetMask("Terrain", "World");
+        private readonly int buildingLayer = LayerMask.GetMask("Terrain", "World", "Construction", "Deployed");
         private readonly int blockLayer = LayerMask.GetMask("Construction");
         private readonly Dictionary<ulong, TeleportTimer> TeleportTimers = new Dictionary<ulong, TeleportTimer>();
         private readonly Dictionary<ulong, Timer> PendingRequests = new Dictionary<ulong, Timer>();
@@ -58,6 +60,7 @@ namespace Oxide.Plugins
             public HomesSettingsData Home { get; set; }
             public TPRData TPR { get; set; }
             public TownData Town { get; set; }
+            public VersionNumber Version { get; set; }
         }
 
         class SettingsData
@@ -92,6 +95,8 @@ namespace Oxide.Plugins
             public bool CheckFoundationForOwner { get; set; }
             public bool UseFriends { get; set; }
             public bool UsableOutOfBuildingBlocked { get; set; }
+            public bool AllowIceberg { get; set; }
+            public bool AllowCave { get; set; }
         }
 
         class TPRData
@@ -231,6 +236,7 @@ namespace Oxide.Plugins
                 {"AdminTPConsoleTPPlayer", "You were teleported to {0}"},
                 {"AdminTPConsoleTPPlayerTarget", "{0} was teleported to you!"},
                 {"HomeTP", "You teleported to your home '{0}'!"},
+                {"HomeAdminTP", "You teleported to {0}'s home '{1}'!"},
                 {"HomeSave", "You have saved the current location as your home!"},
                 {"HomeNoFoundation", "You can only use a home location on a foundation!"},
                 {"HomeFoundationNotOwned", "You can't use home on someone else's house."},
@@ -273,6 +279,7 @@ namespace Oxide.Plugins
                 {"TPRLimitReached", "You have reached the daily limit of {0} teleport requests today!"},
                 {"TPRAmount", "You have {0} teleport requests left today!"},
                 {"TPRTarget", "Your target is currently not available!"},
+                {"TPDead", "You can't teleport while being dead!"},
                 {"TPBuildingBlocked", "You can't teleport while in a building blocked zone!"},
                 {"TPSwimming", "You can't teleport while swimming!"},
                 {"TPCrafting", "You can't teleport while crafting!"},
@@ -315,7 +322,9 @@ namespace Oxide.Plugins
                         "/tpremove <location name> - Removes the location from your saved list.",
                         "/tpb - Teleports you back to the place where you were before teleporting.",
                         "/home radius <radius> - Find all homes in radius.",
-                        "/home delete <player name/id> <home name> - Remove a home from a player."
+                        "/home delete <player name/id> <home name> - Remove a home from a player.",
+                        "/home tp <player name|id> <name> - Teleports you to the home location with the name 'name' from the player.",
+                        "/home homes <player name|id> - Shows you a list of all homes from the player."
                     })
                 },
                 {
@@ -370,8 +379,7 @@ namespace Oxide.Plugins
                     })
                 },
                 {"PlayerNotFound", "The specified player couldn't be found please try again!"},
-                {"PlayerIsSleeping", "The specified player is sleeping!"},
-                {"MultiplePlayersFound", "Found multiple players with that name!"},
+                {"MultiplePlayers", "Found multiple players: {0}"},
                 {"CantTeleportToSelf", "You can't teleport to yourself!"},
                 {"CantTeleportPlayerToSelf", "You can't teleport a player to himself!"},
                 {"TeleportPending", "You can't initiate another teleport while you have a teleport pending!"},
@@ -462,7 +470,9 @@ namespace Oxide.Plugins
                     "SyntaxCommandHomeAdmin", string.Join(NewLine, new[]
                     {
                         "/home radius <radius> - Shows you a list of all homes in radius(10).",
-                        "/home delete <player name|id> <name> - Removes the home location with the name 'name' from the player."
+                        "/home delete <player name|id> <name> - Removes the home location with the name 'name' from the player.",
+                        "/home tp <player name|id> <name> - Teleports you to the home location with the name 'name' from the player.",
+                        "/home homes <player name|id> - Shows you a list of all homes from the player."
                     })
                 },
                 {
@@ -485,6 +495,22 @@ namespace Oxide.Plugins
                         "A Syntax Error Occurred!",
                         "You can only use the /home delete command as follows:",
                         "/home delete <player name/id> <name> - Removes the home location with the name 'name' from the player."
+                    })
+                },
+                {
+                    "SyntaxCommandHomeAdminTP", string.Join(NewLine, new[]
+                    {
+                        "A Syntax Error Occurred!",
+                        "You can only use the /home tp command as follows:",
+                        "/home tp <player name/id> <name> - Teleports you to the home location with the name 'name' from the player."
+                    })
+                },
+                {
+                    "SyntaxCommandHomeHomes", string.Join(NewLine, new[]
+                    {
+                        "A Syntax Error Occurred!",
+                        "You can only use the /home homes command as follows:",
+                        "/home homes <player name/id> - Shows you a list of all homes from the player."
                     })
                 },
                 {
@@ -553,6 +579,11 @@ namespace Oxide.Plugins
                 configData.Town.VIPCooldowns = new Dictionary<string, int> { { PermVip, 5 } };
                 Config.WriteObject(configData, true);
             }
+            if (configData.Version != Version)
+            {
+                configData.Version = Version;
+                Config.WriteObject(configData, true);
+            }
             dataAdmin = GetFile(nameof(NTeleportation) + "Admin");
             Admin = dataAdmin.ReadObject<Dictionary<ulong, AdminData>>();
             dataHome = GetFile(nameof(NTeleportation) + "Home");
@@ -609,14 +640,17 @@ namespace Oxide.Plugins
         void OnEntityTakeDamage(BaseCombatEntity entity, HitInfo hitinfo)
         {
             var player = entity as BasePlayer;
-            if (player == null || hitinfo == null || hitinfo.damageTypes.Total() <= 0) return;
+            if (player == null || hitinfo == null) return;
             TeleportTimer teleportTimer;
             if (!TeleportTimers.TryGetValue(player.userID, out teleportTimer)) return;
-            PrintMsgL(teleportTimer.OriginPlayer, "Interrupted");
-            if (teleportTimer.TargetPlayer != null)
-                PrintMsgL(teleportTimer.TargetPlayer, "InterruptedTarget", teleportTimer.OriginPlayer.displayName);
-            teleportTimer.Timer.Destroy();
-            TeleportTimers.Remove(player.userID);
+            NextTick(() => {
+                if (hitinfo.damageTypes.Total() <= 0) return;
+                PrintMsgL(teleportTimer.OriginPlayer, "Interrupted");
+                if (teleportTimer.TargetPlayer != null)
+                    PrintMsgL(teleportTimer.TargetPlayer, "InterruptedTarget", teleportTimer.OriginPlayer.displayName);
+                teleportTimer.Timer.Destroy();
+                TeleportTimers.Remove(player.userID);
+            });
         }
 
         void OnPlayerDisconnected(BasePlayer player)
@@ -686,12 +720,8 @@ namespace Oxide.Plugins
             switch (args.Length)
             {
                 case 1:
-                    targetPlayer = FindPlayer(args[0]);
-                    if (targetPlayer == null)
-                    {
-                        PrintMsgL(player, "PlayerNotFound");
-                        return;
-                    }
+                    targetPlayer = FindPlayersSingle(args[0], player);
+                    if (targetPlayer == null) return;
                     if (targetPlayer == player)
                     {
                         PrintMsgL(player, "CantTeleportToSelf");
@@ -705,19 +735,16 @@ namespace Oxide.Plugins
                         PrintMsgL(targetPlayer, "AdminTPTarget", player.displayName);
                     break;
                 case 2:
-                    var originPlayer = FindPlayer(args[0]);
-                    targetPlayer = FindPlayer(args[1]);
-                    if (originPlayer == null || targetPlayer == null)
-                    {
-                        PrintMsgL(player, "PlayerNotFound");
-                        return;
-                    }
+                    var originPlayer = FindPlayersSingle(args[0], player);
+                    if (originPlayer == null) return;
+                    targetPlayer = FindPlayersSingle(args[1], player);
+                    if (targetPlayer == null) return;
                     if (targetPlayer == originPlayer)
                     {
                         PrintMsgL(player, "CantTeleportPlayerToSelf");
                         return;
                     }
-                    if (IsAllowed(originPlayer)) SaveLocation(originPlayer);
+                    if (IsAdmin(originPlayer)) SaveLocation(originPlayer);
                     TeleportToPlayer(originPlayer, targetPlayer);
                     PrintMsgL(player, "AdminTPPlayers", originPlayer.displayName, targetPlayer.displayName);
                     PrintMsgL(originPlayer, "AdminTPPlayer", player.displayName, targetPlayer.displayName);
@@ -742,12 +769,8 @@ namespace Oxide.Plugins
                     Puts(_("LogTeleport", null, player.displayName, player.transform.position));
                     break;
                 case 4:
-                    targetPlayer = FindPlayer(args[0]);
-                    if (targetPlayer == null)
-                    {
-                        PrintMsgL(player, "PlayerNotFound");
-                        return;
-                    }
+                    targetPlayer = FindPlayersSingle(args[0], player);
+                    if (targetPlayer == null) return;
                     if (!float.TryParse(args[0], out x) || !float.TryParse(args[1], out y) || !float.TryParse(args[2], out z))
                     {
                         PrintMsgL(player, "InvalidCoordinates");
@@ -759,7 +782,7 @@ namespace Oxide.Plugins
                         PrintMsgL(player, "AdminTPBoundaries", boundary);
                         return;
                     }
-                    if (IsAllowed(targetPlayer)) SaveLocation(targetPlayer);
+                    if (IsAdmin(targetPlayer)) SaveLocation(targetPlayer);
                     TeleportToPosition(targetPlayer, x, y, z);
                     if (player == targetPlayer)
                     {
@@ -787,12 +810,8 @@ namespace Oxide.Plugins
             {
                 case 1:
                 case 2:
-                    var targetPlayer = FindPlayer(args[0]);
-                    if (targetPlayer == null)
-                    {
-                        PrintMsgL(player, "PlayerNotFound");
-                        return;
-                    }
+                    var targetPlayer = FindPlayersSingle(args[0], player);
+                    if (targetPlayer == null) return;
                     if (targetPlayer == player)
                     {
                         PrintMsgL(player, "CantTeleportToSelf");
@@ -807,7 +826,7 @@ namespace Oxide.Plugins
                     destination.x = destination.x - x;
                     destination.z = destination.z - z;
                     SaveLocation(player);
-                    Teleport(player, GetGround(destination));
+                    Teleport(player, GetGroundBuilding(destination));
                     PrintMsgL(player, "AdminTP", targetPlayer.displayName);
                     Puts(_("LogTeleport", null, player.displayName, targetPlayer.displayName));
                     if (configData.Admin.AnnounceTeleportToTarget)
@@ -981,6 +1000,10 @@ namespace Oxide.Plugins
                 SendReply(player, err);
                 return;
             }
+
+            if (player.IsAdmin())
+                player.SendConsoleCommand("ddraw.sphere", 60f, Color.blue, GetGround(positionCoordinates), 2.5f);
+
             err = CheckFoundation(player.userID, positionCoordinates);
             if (err != null)
             {
@@ -1023,7 +1046,7 @@ namespace Oxide.Plugins
             if (args.Length == 0)
             {
                 PrintMsgL(player, "SyntaxCommandHome");
-                if (IsAllowed(player)) PrintMsgL(player, "SyntaxCommandHomeAdmin");
+                if (IsAdmin(player)) PrintMsgL(player, "SyntaxCommandHomeAdmin");
                 return;
             }
             switch (args[0].ToLower())
@@ -1043,6 +1066,12 @@ namespace Oxide.Plugins
                 case "delete":
                     cmdChatHomeDelete(player, command, args.Skip(1).ToArray());
                     break;
+                case "tp":
+                    cmdChatHomeAdminTP(player, command, args.Skip(1).ToArray());
+                    break;
+                case "homes":
+                    cmdChatHomeHomes(player, command, args.Skip(1).ToArray());
+                    break;
                 case "wipe":
                     cmdChatWipeHomes(player, command, args.Skip(1).ToArray());
                     break;
@@ -1052,6 +1081,7 @@ namespace Oxide.Plugins
             }
         }
 
+        [ChatCommand("radiushome")]
         private void cmdChatHomeRadius(BasePlayer player, string command, string[] args)
         {
             if (!IsAllowed(player)) return;
@@ -1061,7 +1091,7 @@ namespace Oxide.Plugins
             foreach (var homeData in Home)
             {
                 var toRemove = new List<string>();
-                var target = FindPlayerById(homeData.Key)?.displayName ?? homeData.Key.ToString();
+                var target = RustCore.FindPlayerById(homeData.Key)?.displayName ?? homeData.Key.ToString();
                 foreach (var location in homeData.Value.Locations)
                 {
                     if (Vector3.Distance(player.transform.position, location.Value) <= radius)
@@ -1072,6 +1102,7 @@ namespace Oxide.Plugins
                             continue;
                         }
                         var entity = GetFoundationOwned(location.Value, homeData.Key);
+                        if (entity == null) continue;
                         player.SendConsoleCommand("ddraw.text", 30f, Color.blue, entity.CenterPoint() + new Vector3(0, .5f), $"<size=20>{target} - {location.Key} {location.Value}</size>");
                         DrawBox(player, entity.CenterPoint(), entity.GetEstimatedWorldRotation(), entity.bounds.size);
                         PrintMsg(player, $"{target} - {location.Key} {location.Value}");
@@ -1088,6 +1119,7 @@ namespace Oxide.Plugins
                 PrintMsgL(player, "HomeNoFound");
         }
 
+        [ChatCommand("deletehome")]
         private void cmdChatHomeDelete(BasePlayer player, string command, string[] args)
         {
             if (!IsAllowed(player)) return;
@@ -1096,17 +1128,8 @@ namespace Oxide.Plugins
                 PrintMsgL(player, "SyntaxCommandHomeDelete");
                 return;
             }
-            var targetPlayer = FindPlayer(args[0]);
-            ulong userId;
-            if (targetPlayer == null)
-            {
-                if (!ulong.TryParse(args[0], out userId))
-                {
-                    PrintMsgL(player, "PlayerNotFound");
-                    return;
-                }
-            }
-            else userId = targetPlayer.userID;
+            var userId = FindPlayersSingleId(args[0], player);
+            if (userId <= 0) return;
             HomeData targetHome;
             if (!Home.TryGetValue(userId, out targetHome) || !targetHome.Locations.Remove(args[1]))
             {
@@ -1115,6 +1138,28 @@ namespace Oxide.Plugins
             }
             changedHome = true;
             PrintMsgL(player, "HomeDelete", args[0], args[1]);
+        }
+
+        [ChatCommand("tphome")]
+        private void cmdChatHomeAdminTP(BasePlayer player, string command, string[] args)
+        {
+            if (!IsAllowed(player)) return;
+            if (args.Length != 2)
+            {
+                PrintMsgL(player, "SyntaxCommandHomeAdminTP");
+                return;
+            }
+            var userId = FindPlayersSingleId(args[0], player);
+            if (userId <= 0) return;
+            HomeData targetHome;
+            Vector3 location;
+            if (!Home.TryGetValue(userId, out targetHome) || !targetHome.Locations.TryGetValue(args[1], out location))
+            {
+                PrintMsgL(player, "HomeNotFound");
+                return;
+            }
+            Teleport(player, location);
+            PrintMsgL(player, "HomeAdminTP", args[0], args[1]);
         }
 
         private void cmdChatHomeTP(BasePlayer player, string command, string[] args)
@@ -1154,8 +1199,10 @@ namespace Oxide.Plugins
             var timestamp = Facepunch.Math.unixTimestamp;
             var currentDate = DateTime.Now.ToString("d");
             if (homeData.Teleports.Date != currentDate)
+            {
                 homeData.Teleports.Amount = 0;
-            homeData.Teleports.Date = currentDate;
+                homeData.Teleports.Date = currentDate;
+            }
             var cooldown = GetCooldown(player, configData.Home.VIPCooldowns, configData.Home.Cooldown);
             if (cooldown > 0 && timestamp - homeData.Teleports.Timestamp < cooldown)
             {
@@ -1261,6 +1308,43 @@ namespace Oxide.Plugins
             }
         }
 
+        [ChatCommand("homehomes")]
+        private void cmdChatHomeHomes(BasePlayer player, string command, string[] args)
+        {
+            if (!IsAllowed(player)) return;
+            if (args.Length != 1)
+            {
+                PrintMsgL(player, "SyntaxCommandHomeHomes");
+                return;
+            }
+            var userId = FindPlayersSingleId(args[0], player);
+            if (userId <= 0) return;
+            HomeData homeData;
+            if (!Home.TryGetValue(userId, out homeData) || homeData.Locations.Count <= 0)
+            {
+                PrintMsgL(player, "HomeListEmpty");
+                return;
+            }
+            PrintMsgL(player, "HomeList");
+            var toRemove = new List<string>();
+            foreach (var location in homeData.Locations)
+            {
+                var err = CheckFoundation(userId, location.Value);
+                if (err != null)
+                {
+                    toRemove.Add(location.Key);
+                    continue;
+                }
+                PrintMsgL(player, $"{location.Key} {location.Value}");
+            }
+            foreach (var loc in toRemove)
+            {
+                PrintMsgL(player, "HomeRemovedInvalid", loc);
+                homeData.Locations.Remove(loc);
+                changedHome = true;
+            }
+        }
+
         [ChatCommand("tpr")]
         private void cmdChatTeleportRequest(BasePlayer player, string command, string[] args)
         {
@@ -1270,20 +1354,21 @@ namespace Oxide.Plugins
                 PrintMsgL(player, "SyntaxCommandTPR");
                 return;
             }
-            var target = FindPlayer(args[0]);
-            if (target == null)
+            var targets = FindPlayersOnline(args[0]);
+            if (targets.Count <= 0)
             {
                 PrintMsgL(player, "PlayerNotFound");
                 return;
             }
+            if (targets.Count > 1)
+            {
+                PrintMsgL(player, "MultiplePlayers", string.Join(", ", targets.ConvertAll(p => p.displayName).ToArray()));
+                return;
+            }
+            var target = targets[0];
             if (target == player)
             {
                 PrintMsgL(player, "CantTeleportToSelf");
-                return;
-            }
-            if (target.IsSleeping())
-            {
-                PrintMsgL(player, "PlayerIsSleeping");
                 return;
             }
             var err = CheckPlayer(player, configData.TPR.UsableOutOfBuildingBlocked);
@@ -1298,8 +1383,10 @@ namespace Oxide.Plugins
             if (!TPR.TryGetValue(player.userID, out tprData))
                 TPR[player.userID] = tprData = new TeleportData();
             if (tprData.Date != currentDate)
+            {
                 tprData.Amount = 0;
-            tprData.Date = currentDate;
+                tprData.Date = currentDate;
+            }
             var cooldown = GetCooldown(player, configData.TPR.VIPCooldowns, configData.TPR.Cooldown);
             if (cooldown > 0 && timestamp - tprData.Timestamp < cooldown)
             {
@@ -1481,7 +1568,7 @@ namespace Oxide.Plugins
             else
             {
                 var msg = _("TPHelpGeneral", player);
-                if (IsAllowed(player))
+                if (IsAdmin(player))
                     msg += NewLine + "/tphelp AdminTP";
                 if (configData.Settings.HomesEnabled)
                     msg += NewLine + "/tphelp Home";
@@ -1514,8 +1601,10 @@ namespace Oxide.Plugins
                         if (!Home.TryGetValue(player.userID, out homeData))
                             Home[player.userID] = homeData = new HomeData();
                         if (homeData.Teleports.Date != currentDate)
+                        {
                             homeData.Teleports.Amount = 0;
-                        homeData.Teleports.Date = currentDate;
+                            homeData.Teleports.Date = currentDate;
+                        }
                         if (limit > 0) PrintMsgL(player, "HomeTPAmount", limit - homeData.Teleports.Amount);
                         if (cooldown > 0 && timestamp - homeData.Teleports.Timestamp < cooldown)
                         {
@@ -1530,8 +1619,10 @@ namespace Oxide.Plugins
                         if (!TPR.TryGetValue(player.userID, out teleportData))
                             TPR[player.userID] = teleportData = new TeleportData();
                         if (teleportData.Date != currentDate)
+                        {
                             teleportData.Amount = 0;
-                        teleportData.Date = currentDate;
+                            teleportData.Date = currentDate;
+                        }
                         if (limit > 0) PrintMsgL(player, "TPRAmount", limit - teleportData.Amount);
                         if (cooldown > 0 && timestamp - teleportData.Timestamp < cooldown)
                         {
@@ -1546,8 +1637,10 @@ namespace Oxide.Plugins
                         if (!Town.TryGetValue(player.userID, out teleportData))
                             Town[player.userID] = teleportData = new TeleportData();
                         if (teleportData.Date != currentDate)
+                        {
                             teleportData.Amount = 0;
-                        teleportData.Date = currentDate;
+                            teleportData.Date = currentDate;
+                        }
                         if (limit > 0) PrintMsgL(player, "TownTPAmount", limit - teleportData.Amount);
                         if (cooldown > 0 && timestamp - teleportData.Timestamp < cooldown)
                         {
@@ -1629,7 +1722,7 @@ namespace Oxide.Plugins
         [ChatCommand("town")]
         private void cmdChatTown(BasePlayer player, string command, string[] args)
         {
-            if (args.Length == 1 && IsAllowed(player) && args[0].ToLower().Equals("set"))
+            if (args.Length == 1 && IsAdmin(player) && args[0].ToLower().Equals("set"))
             {
                 configData.Town.Location = player.transform.position;
                 Config.WriteObject(configData, true);
@@ -1639,7 +1732,7 @@ namespace Oxide.Plugins
             if (args.Length != 0)
             {
                 PrintMsgL(player, "SyntaxCommandTown");
-                if (IsAllowed(player)) PrintMsgL(player, "SyntaxCommandTownAdmin");
+                if (IsAdmin(player)) PrintMsgL(player, "SyntaxCommandTownAdmin");
                 return;
             }
             if (configData.Town.Location == default(Vector3))
@@ -1659,8 +1752,10 @@ namespace Oxide.Plugins
             var timestamp = Facepunch.Math.unixTimestamp;
             var currentDate = DateTime.Now.ToString("d");
             if (teleportData.Date != currentDate)
+            {
                 teleportData.Amount = 0;
-            teleportData.Date = currentDate;
+                teleportData.Date = currentDate;
+            }
             var cooldown = GetCooldown(player, configData.Town.VIPCooldowns, configData.Town.Cooldown);
             if (cooldown > 0 && timestamp - teleportData.Timestamp < cooldown)
             {
@@ -1734,6 +1829,7 @@ namespace Oxide.Plugins
         private bool ccmdTeleport(ConsoleSystem.Arg arg)
         {
             if (arg.Player() != null && !IsAllowed(arg.Player())) return false;
+            List<BasePlayer> players;
             switch (arg.cmd.namefull)
             {
                 case "teleport.topos":
@@ -1742,12 +1838,18 @@ namespace Oxide.Plugins
                         arg.ReplyWith(_("SyntaxConsoleCommandToPos", arg.Player()));
                         return false;
                     }
-                    var targetPlayer = FindPlayer(arg.GetString(0));
-                    if (targetPlayer == null)
+                    players = FindPlayers(arg.GetString(0));
+                    if (players.Count <= 0)
                     {
                         arg.ReplyWith(_("PlayerNotFound", arg.Player()));
                         return false;
                     }
+                    if (players.Count > 1)
+                    {
+                        arg.ReplyWith(_("MultiplePlayers", arg.Player(), string.Join(", ", players.ConvertAll(p => p.displayName).ToArray())));
+                        return false;
+                    }
+                    var targetPlayer = players[0];
                     var x = arg.GetFloat(1, -10000);
                     var y = arg.GetFloat(2, -10000);
                     var z = arg.GetFloat(3, -10000);
@@ -1756,7 +1858,7 @@ namespace Oxide.Plugins
                         arg.ReplyWith(_("AdminTPOutOfBounds", arg.Player()) + Environment.NewLine + _("AdminTPBoundaries", arg.Player(), boundary));
                         return false;
                     }
-                    if (IsAllowed(targetPlayer)) SaveLocation(targetPlayer);
+                    if (IsAdmin(targetPlayer)) SaveLocation(targetPlayer);
                     TeleportToPosition(targetPlayer, x, y, z);
                     PrintMsgL(targetPlayer, "AdminTPConsoleTP", targetPlayer.transform.position);
                     arg.ReplyWith(_("AdminTPTargetCoordinates", arg.Player(), targetPlayer.displayName, targetPlayer.transform.position));
@@ -1768,19 +1870,36 @@ namespace Oxide.Plugins
                         arg.ReplyWith(_("SyntaxConsoleCommandToPlayer", arg.Player()));
                         return false;
                     }
-                    var originPlayer = FindPlayer(arg.GetString(0));
-                    targetPlayer = FindPlayer(arg.GetString(1));
-                    if (originPlayer == null || targetPlayer == null)
+                    players = FindPlayers(arg.GetString(0));
+                    if (players.Count <= 0)
                     {
                         arg.ReplyWith(_("PlayerNotFound", arg.Player()));
                         return false;
                     }
+                    if (players.Count > 1)
+                    {
+                        arg.ReplyWith(_("MultiplePlayers", arg.Player(), string.Join(", ", players.ConvertAll(p => p.displayName).ToArray())));
+                        return false;
+                    }
+                    var originPlayer = players[0];
+                    players = FindPlayers(arg.GetString(1));
+                    if (players.Count <= 0)
+                    {
+                        arg.ReplyWith(_("PlayerNotFound", arg.Player()));
+                        return false;
+                    }
+                    if (players.Count > 1)
+                    {
+                        arg.ReplyWith(_("MultiplePlayers", arg.Player(), string.Join(", ", players.ConvertAll(p => p.displayName).ToArray())));
+                        return false;
+                    }
+                    targetPlayer = players[0];
                     if (targetPlayer == originPlayer)
                     {
                         arg.ReplyWith(_("CantTeleportPlayerToSelf", arg.Player()));
                         return false;
                     }
-                    if (IsAllowed(originPlayer)) SaveLocation(originPlayer);
+                    if (IsAdmin(originPlayer)) SaveLocation(originPlayer);
                     TeleportToPlayer(originPlayer, targetPlayer);
                     arg.ReplyWith(_("AdminTPPlayers", arg.Player(), originPlayer.displayName, targetPlayer.displayName));
                     PrintMsgL(originPlayer, "AdminTPConsoleTPPlayer", targetPlayer.displayName);
@@ -1788,6 +1907,54 @@ namespace Oxide.Plugins
                     Puts(_("LogTeleportPlayer", null, arg.Player()?.displayName, originPlayer.displayName, targetPlayer.displayName));
                     break;
             }
+            return false;
+        }
+
+        [ConsoleCommand("teleport.importhomes")]
+        private bool ccmdImportHomes(ConsoleSystem.Arg arg)
+        {
+            if (arg.Player() != null && !IsAllowed(arg.Player()))
+            {
+                arg.ReplyWith("Not allowed.");
+                return false;
+            }
+            var datafile = Interface.Oxide.DataFileSystem.GetFile("m-Teleportation");
+            if (!datafile.Exists())
+            {
+                arg.ReplyWith("No m-Teleportation.json exists.");
+                return false;
+            }
+            datafile.Load();
+            var allHomeData = datafile["HomeData"] as Dictionary<string, object>;
+            if (allHomeData == null)
+            {
+                arg.ReplyWith("Empty HomeData.");
+                return false;
+            }
+            var count = 0;
+            foreach (var kvp in allHomeData)
+            {
+                var homeDataOld = kvp.Value as Dictionary<string, object>;
+                if (homeDataOld == null) continue;
+                if (!homeDataOld.ContainsKey("HomeLocations")) continue;
+                var homeList = homeDataOld["HomeLocations"] as Dictionary<string, object>;
+                if (homeList == null) continue;
+                var userId = Convert.ToUInt64(kvp.Key);
+                HomeData homeData;
+                if (!Home.TryGetValue(userId, out homeData))
+                    Home[userId] = homeData = new HomeData();
+                foreach (var kvp2 in homeList)
+                {
+                    var positionData = kvp2.Value as Dictionary<string, object>;
+                    if (positionData == null) continue;
+                    if (!positionData.ContainsKey("x") || !positionData.ContainsKey("y") || !positionData.ContainsKey("z")) continue;
+                    var position = new Vector3(Convert.ToSingle(positionData["x"]), Convert.ToSingle(positionData["y"]), Convert.ToSingle(positionData["z"]));
+                    homeData.Locations[kvp2.Key] = position;
+                    changedHome = true;
+                    count++;
+                }
+            }
+            arg.ReplyWith(string.Format("Imported {0} homes.", count));
             return false;
         }
 
@@ -1854,6 +2021,8 @@ namespace Oxide.Plugins
 
         private string CheckPlayer(BasePlayer player, bool build = false)
         {
+            if (!player.IsAlive())
+                return "TPDead";
             if (!build && !player.CanBuild())
                 return "TPBuildingBlocked";
             if (player.IsSwimming())
@@ -1884,21 +2053,20 @@ namespace Oxide.Plugins
         public void Teleport(BasePlayer player, Vector3 position)
         {
             if (player.net?.connection != null)
-            {
                 player.ClientRPCPlayer(null, player, "StartLoading", null, null, null, null, null);
-                StartSleeping(player);
-                //player.SetPlayerFlag(BasePlayer.PlayerFlags.HasBuildingPrivilege, false);
-                //player.SetPlayerFlag(BasePlayer.PlayerFlags.InBuildingPrivilege, false);
-                player.SetPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot, true);
-                player.ClientRPCPlayer(null, player, "ForcePositionTo", position);
-            }
+            StartSleeping(player);
             player.MovePosition(position);
+            if (player.net?.connection != null)
+                player.ClientRPCPlayer(null, player, "ForcePositionTo", position);
             player.TransformChanged();
+            if (player.net?.connection != null)
+                player.SetPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot, true);
             player.UpdateNetworkGroup();
             //player.UpdatePlayerCollider(true, false);
             player.SendNetworkUpdateImmediate(false);
             if (player.net?.connection == null) return;
-            player.ClearEntityQueue(null);
+            //TODO temporary for potential rust bug
+            try { player.ClearEntityQueue(null); } catch { }
             player.SendFullSnapshot();
         }
 
@@ -1926,10 +2094,11 @@ namespace Oxide.Plugins
             if (!configData.Home.UseFriends)
                 return "HomeFoundationNotOwned";
             var moderator = (bool)(Clans?.CallHook("IsModerator", userID) ?? false);
+            var userIdString = userID.ToString();
             for (var i = 0; i < entities.Count; i++)
             {
                 var entity = entities[i];
-                if ((bool) (Friends?.CallHook("HasFriend", entity.OwnerID, userID) ?? false) || (bool) (Clans?.CallHook("HasFriend", entity.OwnerID, userID) ?? false) && moderator || (bool) (RustIO?.CallHook("HasFriend", entity.OwnerID.ToString(), userID.ToString()) ?? false))
+                if ((bool) (Friends?.CallHook("HasFriend", entity.OwnerID, userID) ?? false) || (bool) (Clans?.CallHook("HasFriend", entity.OwnerID, userID) ?? false) && moderator || (bool) (RustIO?.CallHook("HasFriend", entity.OwnerID.ToString(), userIdString) ?? false))
                     return null;
             }
             return "HomeFoundationNotFriendsOwned";
@@ -1958,15 +2127,14 @@ namespace Oxide.Plugins
 
         private List<BuildingBlock> GetFoundation(Vector3 positionCoordinates)
         {
-            var position = positionCoordinates;
-            position.y = TerrainMeta.HeightMap.GetHeight(position);
+            var position = GetGround(positionCoordinates);
             var entities = new List<BuildingBlock>();
             var hits = Pool.GetList<BuildingBlock>();
-            Vis.Entities(position, 2.5f, hits, blockLayer);
+            Vis.Entities(position, 2.5f, hits, buildingLayer);
             for (var i = 0; i < hits.Count; i++)
             {
                 var entity = hits[i];
-                if (!entity.LookupPrefabName().Contains("foundation") || Vector3.Distance(position, entity.CenterPoint()) > 2) continue;
+                if (!entity.LookupPrefabName().Contains("foundation")/* || Vector3.Distance(position, entity.CenterPoint()) > 4*/) continue;
                 entities.Add(entity);
             }
             Pool.FreeList(ref hits);
@@ -1980,25 +2148,43 @@ namespace Oxide.Plugins
 
         private Vector3 GetGround(Vector3 sourcePos)
         {
+            var oldPos = sourcePos;
             sourcePos.y = TerrainMeta.HeightMap.GetHeight(sourcePos);
             RaycastHit hitinfo;
-            if (Physics.Raycast(sourcePos, Vector3.down, out hitinfo, groundLayer))
+            if (configData.Home.AllowCave && Physics.SphereCast(oldPos, .1f, Vector3.down, out hitinfo, groundLayer) && hitinfo.collider.name.Contains("rock_"))
+                sourcePos.y = hitinfo.point.y;
+            if (configData.Home.AllowIceberg && Physics.SphereCast(sourcePos, .1f, Vector3.up, out hitinfo, groundLayer) && hitinfo.collider.name.Contains("iceberg"))
+            {
+                sourcePos.y = hitinfo.collider.bounds.max.y;
+                if (Physics.SphereCast(sourcePos + Vector3.up, .1f, Vector3.down, out hitinfo, groundLayer))
+                    sourcePos.y = hitinfo.point.y - 1.25f;
+            }
+            return sourcePos;
+        }
+
+        private Vector3 GetGroundBuilding(Vector3 sourcePos)
+        {
+            sourcePos.y = TerrainMeta.HeightMap.GetHeight(sourcePos);
+            RaycastHit hitinfo;
+            if (Physics.Raycast(sourcePos, Vector3.down, out hitinfo, buildingLayer))
             {
                 sourcePos.y = System.Math.Max(hitinfo.point.y, sourcePos.y);
                 return sourcePos;
             }
-            if (Physics.Raycast(sourcePos, Vector3.up, out hitinfo, groundLayer))
+            if (Physics.Raycast(sourcePos, Vector3.up, out hitinfo, buildingLayer))
                 sourcePos.y = System.Math.Max(hitinfo.point.y, sourcePos.y);
             return sourcePos;
         }
-
-        private bool IsAllowed(BasePlayer player)
+        private bool IsAdmin(BasePlayer player)
         {
             var playerAuthLevel = player.net?.connection?.authLevel;
             var requiredAuthLevel = 2;
-            if (configData.Admin.UseableByModerators)
-                requiredAuthLevel = 1;
-            if (!(playerAuthLevel < requiredAuthLevel)) return true;
+            if (configData.Admin.UseableByModerators) requiredAuthLevel = 1;
+            return playerAuthLevel >= requiredAuthLevel;
+        }
+        private bool IsAllowed(BasePlayer player)
+        {
+            if (IsAdmin(player)) return true;
             PrintMsg(player, "NotAllowed");
             return false;
         }
@@ -2082,45 +2268,79 @@ namespace Oxide.Plugins
             return rotation * (point - pivot) + pivot;
         }
 
-        public static BasePlayer FindPlayer(string nameOrIdOrIp)
+        private ulong FindPlayersSingleId(string nameOrIdOrIp, BasePlayer player)
         {
-            BasePlayer player = null;
+            var targets = FindPlayers(nameOrIdOrIp);
+            if (targets.Count > 1)
+            {
+                PrintMsgL(player, "MultiplePlayers", string.Join(", ", targets.ConvertAll(p => p.displayName).ToArray()));
+                return 0;
+            }
+            ulong userId;
+            if (targets.Count <= 0)
+            {
+                if (!ulong.TryParse(nameOrIdOrIp, out userId))
+                {
+                    PrintMsgL(player, "PlayerNotFound");
+                    return 0;
+                }
+            }
+            else
+                userId = targets[0].userID;
+            return userId;
+        }
+
+        private BasePlayer FindPlayersSingle(string nameOrIdOrIp, BasePlayer player)
+        {
+            var targets = FindPlayers(nameOrIdOrIp);
+            if (targets.Count <= 0)
+            {
+                PrintMsgL(player, "PlayerNotFound");
+                return null;
+            }
+            if (targets.Count > 1)
+            {
+                PrintMsgL(player, "MultiplePlayers", string.Join(", ", targets.ConvertAll(p => p.displayName).ToArray()));
+                return null;
+            }
+            return targets[0];
+        }
+
+        private static List<BasePlayer> FindPlayers(string nameOrIdOrIp)
+        {
+            var players = new List<BasePlayer>();
             foreach (var activePlayer in BasePlayer.activePlayerList)
             {
                 if (activePlayer.UserIDString.Equals(nameOrIdOrIp))
-                    return activePlayer;
-                if (activePlayer.displayName.Equals(nameOrIdOrIp, StringComparison.OrdinalIgnoreCase))
-                    return activePlayer;
-                if (activePlayer.displayName.Contains(nameOrIdOrIp, CompareOptions.OrdinalIgnoreCase))
-                    player = activePlayer;
-                if (activePlayer.net?.connection != null && activePlayer.net.connection.ipaddress.Equals(nameOrIdOrIp))
-                    return activePlayer;
+                    players.Add(activePlayer);
+                else if (activePlayer.displayName.Contains(nameOrIdOrIp, CompareOptions.OrdinalIgnoreCase))
+                    players.Add(activePlayer);
+                else if (activePlayer.net?.connection != null && activePlayer.net.connection.ipaddress.Equals(nameOrIdOrIp))
+                    players.Add(activePlayer);
             }
             foreach (var sleepingPlayer in BasePlayer.sleepingPlayerList)
             {
                 if (sleepingPlayer.UserIDString.Equals(nameOrIdOrIp))
-                    return sleepingPlayer;
-                if (sleepingPlayer.displayName.Equals(nameOrIdOrIp, StringComparison.OrdinalIgnoreCase))
-                    return sleepingPlayer;
-                if (sleepingPlayer.displayName.Contains(nameOrIdOrIp, CompareOptions.OrdinalIgnoreCase))
-                    player = sleepingPlayer;
+                    players.Add(sleepingPlayer);
+                else if (sleepingPlayer.displayName.Contains(nameOrIdOrIp, CompareOptions.OrdinalIgnoreCase))
+                    players.Add(sleepingPlayer);
             }
-            return player;
+            return players;
         }
 
-        public static BasePlayer FindPlayerById(ulong userId)
+        private static List<BasePlayer> FindPlayersOnline(string nameOrIdOrIp)
         {
+            var players = new List<BasePlayer>();
             foreach (var activePlayer in BasePlayer.activePlayerList)
             {
-                if (activePlayer.userID == userId)
-                    return activePlayer;
+                if (activePlayer.UserIDString.Equals(nameOrIdOrIp))
+                    players.Add(activePlayer);
+                else if (activePlayer.displayName.Contains(nameOrIdOrIp, CompareOptions.OrdinalIgnoreCase))
+                    players.Add(activePlayer);
+                else if (activePlayer.net?.connection != null && activePlayer.net.connection.ipaddress.Equals(nameOrIdOrIp))
+                    players.Add(activePlayer);
             }
-            foreach (var sleepingPlayer in BasePlayer.sleepingPlayerList)
-            {
-                if (sleepingPlayer.userID == userId)
-                    return sleepingPlayer;
-            }
-            return null;
+            return players;
         }
 
         private class UnityVector3Converter : JsonConverter
