@@ -74,7 +74,7 @@ namespace Oxide.Plugins
                     AddFriendReverse(data.Key, friend);
         }
 
-        private object OnTurretSetTarget(AutoTurret turret, BaseCombatEntity targ)
+        private object OnTurretTarget(AutoTurret turret, BaseCombatEntity targ)
         {
             if (!configData.ShareAutoTurrets || !(targ is BasePlayer) || turret.OwnerID <= 0) return null;
             var player = (BasePlayer) targ;
