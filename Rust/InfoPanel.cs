@@ -9,6 +9,7 @@ using Newtonsoft.Json;
 
 using Oxide.Core;
 using Oxide.Core.Plugins;
+using Oxide.Game.Rust;
 using Oxide.Game.Rust.Cui;
 
 namespace Oxide.Plugins
@@ -1256,7 +1257,8 @@ namespace Oxide.Plugins
 
             public string GetCoord(string PlayerID)
             {
-                var player = BasePlayer.activePlayerList.FirstOrDefault(p => p.UserIDString == PlayerID);
+                var player = RustCore.FindPlayerByIdString(PlayerID);
+                if (player == null) return string.Empty;
                 return $"X: {player.transform.position.x.ToString("0")} | Z: {player.transform.position.z.ToString("0")}";
             }
 
@@ -1298,7 +1300,9 @@ namespace Oxide.Plugins
 
             public string GetDirection(string PlayerID)
             {
-                var player = BasePlayer.activePlayerList.FirstOrDefault(p => p.UserIDString == PlayerID);
+                var player = RustCore.FindPlayerByIdString(PlayerID);
+
+                if (player == null) return string.Empty;
 
                 var PCurrent = player.eyes.rotation.eulerAngles;
 

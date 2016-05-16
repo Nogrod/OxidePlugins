@@ -26,7 +26,7 @@ using Timer = Oxide.Plugins.Timer;
 namespace Oxide.Plugins
 {
 
-    [Info("Hunt RPG", "PedraozauM / SW / Nogrod", "1.5.5", ResourceId = 841)]
+    [Info("Hunt RPG", "PedraozauM / SW / Nogrod", "1.5.6", ResourceId = 841)]
     public class HuntPlugin : RustPlugin
     {
         [PluginReference]
@@ -1414,7 +1414,7 @@ namespace Oxide.Plugins
                 SkillTable[HRK.Tamer].Enabled = false;
             }
             if (DeleteProfileAfter <= 0) return;
-            var now = Facepunch.Math.unixTimestamp;
+            var now = Facepunch.Math.Epoch.Current;
             var delTime = now - 86400 * DeleteProfileAfter;
             var toRemove = new List<ulong>();
             foreach (var profile in Data.Profiles)
@@ -1984,7 +1984,7 @@ namespace Oxide.Plugins
             {
                 config.SetUserId(userId);
                 config.SteamName = player.displayName;
-                config.LastSeen = Facepunch.Math.unixTimestamp;
+                config.LastSeen = Facepunch.Math.Epoch.Current;
                 return config;
             }
             Data.Profiles[userId] = config = new RPGInfo(player.displayName, DefaultHud, ShowProfile);

@@ -104,7 +104,7 @@ namespace Oxide.Plugins
                 if (!hasFriend)
                     return null;
             }
-            var now = Facepunch.Math.unixTimestamp;
+            var now = Facepunch.Math.Epoch.Current;
             int time;
             var key = $"{attackerId}-{victimId}";
             if (!times.TryGetValue(key, out time) || time < now)

@@ -2,21 +2,43 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-
+using Oxide.Core;
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Block Remover", "bawNg / Nogrod", "0.4.0")]
+    [Info("Block Remover", "bawNg / Nogrod", "0.4.1")]
     class BlockRemover : RustPlugin
     {
-        const float cupboardDistance = 60f;
+        private ConfigData configData;
         private readonly FieldInfo instancesField = typeof(MeshColliderBatch).GetField("instances", BindingFlags.Instance | BindingFlags.NonPublic);
+        private readonly Collider[] colBuffer = (Collider[])typeof(Vis).GetField("colBuffer", (BindingFlags.Static | BindingFlags.NonPublic)).GetValue(null);
         private const string PermCount = "blockremover.count";
         private const string PermRemove = "blockremover.remove";
 
+        class ConfigData
+        {
+            public float CupboardDistance { get; set; }
+            public VersionNumber Version { get; set; }
+        }
+
+        protected override void LoadDefaultConfig()
+        {
+            Config.WriteObject(new ConfigData
+            {
+                CupboardDistance = 30f,
+                Version = Version
+            }, true);
+        }
+
         void Loaded()
         {
+            configData = Config.ReadObject<ConfigData>();
+            if (configData.Version != Version)
+            {
+                configData.Version = Version;
+                Config.WriteObject(configData, true);
+            }
             permission.RegisterPermission(PermCount, this);
             permission.RegisterPermission(PermRemove, this);
         }
@@ -58,7 +80,7 @@ namespace Oxide.Plugins
         void cmdRemoveBlockAll(ConsoleSystem.Arg arg)
         {
             if (!CheckAccess(arg, PermRemove)) return;
-            PrintToChat($"<color=red>Admin is removing all blocks outside of cupboard range...</color>");
+            PrintToChat("<color=red>Admin is removing all blocks outside of cupboard range...</color>");
             var stabilityEntities = FindAllCupboardlessStabilityEntities();
             var started_at = Time.realtimeSinceStartup;
             foreach (var building_block in stabilityEntities)
@@ -84,12 +106,15 @@ namespace Oxide.Plugins
         void FilterAllCupboardless<T>(HashSet<T> blocks) where T : StabilityEntity
         {
             var toolCupboards = FindAllToolCupboards();
-            float squaredDist = cupboardDistance * cupboardDistance;
+            float squaredDist = configData.CupboardDistance * configData.CupboardDistance;
             var started_at = Time.realtimeSinceStartup;
             foreach (var cupboard in toolCupboards)
             {
-                foreach (var collider in Physics.OverlapSphere(cupboard.transform.position, cupboardDistance, 270532864))
+                var count = Physics.OverlapSphereNonAlloc(cupboard.transform.position, configData.CupboardDistance, colBuffer, 270532864);
+                for (var i = 0; i < count; i ++)
                 {
+                    var collider = colBuffer[i];
+                    colBuffer[i] = null;
                     if (!collider.transform.CompareTag("MeshColliderBatch"))
                     {
                         var buildingBlock = collider.GetComponentInParent<T>();
