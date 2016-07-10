@@ -21,10 +21,10 @@ using JSONValueType = JSON.ValueType;
 
 namespace Oxide.Plugins
 {
-    [Info("ItemConfig", "Nogrod", "1.0.30", ResourceId = 806)]
+    [Info("ItemConfig", "Nogrod", "1.0.31", ResourceId = 806)]
     class ItemConfig : RustPlugin
     {
-        private const int VersionConfig = 7;
+        private const int VersionConfig = 8;
         private string _configpath = "";
         private bool _craftingController;
         private bool _stackSizes;
@@ -105,11 +105,6 @@ namespace Oxide.Plugins
                 obj.Remove("itemid");
                 obj["displayName"] = definition.displayName.english;
                 obj["displayDescription"] = definition.displayDescription.english;
-                if (definition.needsBlueprint != null)
-                {
-                    //Puts("NeedsBlueprint: {0}", definition.needsBlueprint.shortname);
-                    obj["needsBlueprint"] = definition.needsBlueprint.shortname;
-                }
                 var mods = definition.GetComponentsInChildren<ItemMod>(true);
                 var modArray = new JSONArray();
                 foreach (var itemMod in mods)
@@ -294,6 +289,7 @@ namespace Oxide.Plugins
             {
                 bp.Obj["targetItem"] = bp.Obj.GetObject("targetItem").GetString("shortname", "unnamed");
                 bp.Obj.Remove("userCraftable");
+                bp.Obj.Remove("defaultBlueprint");
                 foreach (var ing in bp.Obj.GetArray("ingredients"))
                 {
                     ing.Obj["shortname"] = ing.Obj.GetObject("itemDef").GetString("shortname", "unnamed");
@@ -378,6 +374,7 @@ namespace Oxide.Plugins
         {
             _itemsDict = ItemManager.itemList.ToDictionary(i => i.shortname);
             _bpsDict = ItemManager.bpList.ToDictionary(i => i.targetItem.shortname);
+            Puts(string.Join(", ", _bpsDict.Keys.ToArray()));
             var items = Config["Items"] as List<object>;
             if (items == null)
             {
@@ -438,9 +435,11 @@ namespace Oxide.Plugins
             bp.rarity = GetRarity(o);
             if (!_craftingController) bp.time = o.GetFloat("time", 0);
             bp.amountToCreate = o.GetInt("amountToCreate", 1);
+            bp.UnlockPrice = o.GetInt("UnlockPrice", 0);
+            bp.UnlockLevel = o.GetInt("UnlockLevel", 10);
             //bp.userCraftable = o.GetBoolean("userCraftable", true);
-            bp.defaultBlueprint = o.GetBoolean("defaultBlueprint", false);
             bp.isResearchable = o.GetBoolean("isResearchable", true);
+            bp.NeedsSteamItem = o.GetBoolean("NeedsSteamItem", false);
             var ingredients = o.GetArray("ingredients");
             bp.ingredients.Clear();
             foreach (var ingredient in ingredients)
@@ -454,7 +453,6 @@ namespace Oxide.Plugins
         private void UpdateItem(ItemDefinition definition, JSONObject item)
         {
             definition.shortname = item.GetString("shortname", "unnamed");
-            definition.needsBlueprint = GetItem(item, "needsBlueprint");
             if (!_stackSizes) definition.stackable = item.GetInt("stackable", 1);
             definition.maxDraggable = item.GetInt("maxDraggable", 0);
             definition.category = (ItemCategory)Enum.Parse(typeof(ItemCategory), item.GetString("category", "Weapon"));
@@ -522,7 +520,6 @@ namespace Oxide.Plugins
                 else if (typeName.Equals("ItemModReveal"))
                 {
                     var itemMod = definition.GetComponent<ItemModReveal>();
-                    itemMod.asBlueprint = mod.GetBoolean("asBlueprint", false);
                     itemMod.revealedItemAmount = mod.GetInt("revealedItemAmount", 1);
                     itemMod.numForReveal = mod.GetInt("numForReveal", 1);
                     itemMod.revealedItemOverride = GetItem(mod, "revealedItemOverride");
@@ -542,6 +539,12 @@ namespace Oxide.Plugins
                     itemMod.numRecycledItemMin = mod.GetInt("numRecycledItemMin", 1);
                     itemMod.numRecycledItemMax = mod.GetInt("numRecycledItemMax", 1);
                     itemMod.recycleIntoItem = GetItem(mod, "recycleIntoItem");
+                }
+                else if (typeName.Equals("ItemModXPWhenUsed"))
+                {
+                    var itemMod = definition.GetComponent<ItemModXPWhenUsed>();
+                    itemMod.xpPerUnit = mod.GetFloat("xpPerUnit", 0);
+                    itemMod.unitSize = mod.GetInt("unitSize", 1);
                 }
                 else if (typeName.Equals("ItemModSwap"))
                 {

@@ -36,13 +36,13 @@ namespace Oxide.Plugins
 
         class UnityWeb : MonoBehaviour
         {
-            Queue<QueueItem> QueueList = new Queue<QueueItem>();
-            byte ActiveLoads;
-            SignArtist SignArtist;
+            private Queue<QueueItem> QueueList = new Queue<QueueItem>();
+            private byte ActiveLoads;
+            private SignArtist SignArtist;
 
             private void Awake()
             {
-                SignArtist = (SignArtist) Interface.Oxide.RootPluginManager.GetPlugin(nameof(SignArtist));
+                SignArtist = (SignArtist)Interface.Oxide.RootPluginManager.GetPlugin(nameof(SignArtist));
             }
 
             private void OnDestroy()
@@ -109,6 +109,7 @@ namespace Oxide.Plugins
                                 FileStorage.server.Remove(sign.textureID, FileStorage.Type.png, sign.net.ID);
                             sign.textureID = FileStorage.server.Store(img, FileStorage.Type.png, sign.net.ID);
                             sign.SendNetworkUpdate();
+                            Interface.Oxide.CallHook("OnSignUpdated", sign, player);
                             player.ChatMessage(SignArtist.Loaded);
 
                             if (SignArtist.ConsoleLog)

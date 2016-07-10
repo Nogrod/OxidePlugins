@@ -21,7 +21,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("HumanNPC", "Reneb/Nogrod/Calytic", "0.3.3", ResourceId = 856)]
+    [Info("HumanNPC", "Reneb/Nogrod/Calytic", "0.3.4", ResourceId = 856)]
     public class HumanNPC : RustPlugin
     {
         //////////////////////////////////////////////////////
@@ -384,6 +384,7 @@ namespace Oxide.Plugins
 
             void ProcessAttack(BaseCombatEntity entity)
             {
+				//Interface.Oxide.LogInfo("ProcessAttack: {0} - {1}", npc.player.displayName, entity.name);
                 if (entity != null && entity.IsAlive())
                 {
                     var c_attackDistance = Vector3.Distance(entity.transform.position, npc.player.transform.position);
@@ -394,12 +395,16 @@ namespace Oxide.Plugins
                     //Interface.Oxide.LogInfo("Entity: {0} {1} {2}", entity.GetType().FullName, entity.IsAlive(), validAttack);
                     if (validAttack)
                     {
-                        if (c_attackDistance < npc.info.damageDistance && CanSee(npc.player, entity))
+                        var range = c_attackDistance < npc.info.damageDistance;
+                        var see = CanSee(npc.player, entity);
+                        if (range && see)
                         {
                             AttemptAttack(entity);
                             return;
                         }
-                        if (c_attackDistance > npc.info.attackDistance)
+                        if (GetSpeed() <= 0)
+                            npc.EndAttackingEntity();
+                        else
                             Move(npc.player.transform.position);
                     }
                     else
@@ -502,7 +507,7 @@ namespace Oxide.Plugins
 
             public void Enable()
             {
-                if (GetSpeed() <= 0) return;
+                //if (GetSpeed() <= 0) return;
                 enabled = true;
             }
             public void Disable() { enabled = false; }
@@ -535,9 +540,16 @@ namespace Oxide.Plugins
             public void CreateProjectileEffect(BaseCombatEntity target, BaseProjectile baseProjectile, float dmg, bool miss = false)
             {
                 if (baseProjectile.primaryMagazine.contents <= 0)
+                {
+                    //Interface.Oxide.LogInfo("Attack failed(empty): {0} - {1}", npc.player.displayName, attackEntity.name);
                     return;
+                }
                 var component = baseProjectile.primaryMagazine.ammoType.GetComponent<ItemModProjectile>();
-                if (component == null) return;
+                if (component == null)
+                {
+                    //Interface.Oxide.LogInfo("Attack failed(Component): {0} - {1}", npc.player.displayName, attackEntity.name);
+                    return;
+                }
                 npc.LookTowards(target.transform.position);
 
                 var source = npc.player.transform.position + npc.player.GetOffset() + Quaternion.LookRotation(target.transform.position - npc.player.transform.position)*baseProjectile.ikHold_max.position;
@@ -547,7 +559,7 @@ namespace Oxide.Plugins
                 RaycastHit raycastHit;
                 if (!Physics.SphereCast(source, .1f, vector32, out raycastHit, npc.info.attackDistance + 5f) || raycastHit.collider.GetComponent<BaseCombatEntity>() == null)
                 {
-                    npc.StartGo(npc.player.transform.position + npc.player.transform.rotation * Quaternion.Euler(0, -90, 0) * new Vector3(5, 0));
+                    //Interface.Oxide.LogInfo("Attack failed: {0} - {1}", npc.player.displayName, attackEntity.name);
                     return;
                 }
                 baseProjectile.primaryMagazine.contents--;
@@ -701,6 +713,8 @@ namespace Oxide.Plugins
                 player.syncPosition = true;
                 if (!update)
                 {
+                    player.xp = ServerMgr.Xp.GetAgent(info.userid);
+                    player.stats = new PlayerStatistics(player);
                     player.userID = info.userid;
                     player.UserIDString = player.userID.ToString();
                     player.MovePosition(info.spawnInfo.position);

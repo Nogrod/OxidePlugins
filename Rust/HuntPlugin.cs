@@ -26,7 +26,7 @@ using Timer = Oxide.Plugins.Timer;
 namespace Oxide.Plugins
 {
 
-    [Info("Hunt RPG", "PedraozauM / SW / Nogrod", "1.5.6", ResourceId = 841)]
+    [Info("Hunt RPG", "PedraozauM / SW / Nogrod", "1.5.7", ResourceId = 841)]
     public class HuntPlugin : RustPlugin
     {
         [PluginReference]
@@ -681,9 +681,9 @@ namespace Oxide.Plugins
                 case "lvlup":
                     LevelUpChatHandler(player, args, rpgInfo);
                     return;
-                case "research":
+                /*case "research":
                     ResearchItemHandler(player, args, rpgInfo);
-                    return;
+                    return;*/
                 case "xp":
                     ChatMessage(player, XPProgression(player, rpgInfo));
                     return;
@@ -1039,7 +1039,7 @@ namespace Oxide.Plugins
                 ChatMessage(callerPlayer, HMK.PlayerLevelUp, player.displayName, desiredLevel);
         }
 
-        private bool ResearchItemHandler(BasePlayer player, string[] args, RPGInfo rpgInfo)
+        /*private bool ResearchItemHandler(BasePlayer player, string[] args, RPGInfo rpgInfo)
         {
             var commandArgs = args?.Length - 1 ?? 0;
             if (commandArgs != 1)
@@ -1115,7 +1115,7 @@ namespace Oxide.Plugins
                 ChatMessage(player, HMK.ResearchReuse, TimeLeft(availableAt, time));
             }
             return true;
-        }
+        }*/
 
         private void ChangePlayerXPMessagePreference(BasePlayer player, string[] args, RPGInfo rpgInfo)
         {
@@ -1413,6 +1413,7 @@ namespace Oxide.Plugins
                 Puts(_(HMK.PetsPlugin));
                 SkillTable[HRK.Tamer].Enabled = false;
             }
+            SkillTable[HRK.Researcher].Enabled = false;
             if (DeleteProfileAfter <= 0) return;
             var now = Facepunch.Math.Epoch.Current;
             var delTime = now - 86400 * DeleteProfileAfter;
@@ -2226,7 +2227,7 @@ namespace Hunt.RPG
             skillTable.Add(HRK.Gatherer, gatherer);
             var researcher = new Skill(HRK.Researcher, HMK.ResearcherDesc, 30, 5)
             {
-                SkillPointsPerLevel = 7, Usage = HMK.ResearcherUsage
+                SkillPointsPerLevel = 7, Usage = HMK.ResearcherUsage, Enabled = false
             };
             researcher.AddRequiredStat("int", researcher.RequiredLevel*3);
             researcher.AddModifier(HRK.Cooldown, new Modifier( /*HRK.Cooldown, */new[] {10f, 2f}));

@@ -132,6 +132,11 @@ namespace Oxide.Plugins
         private StoredData storedData;
         private Zone[] zoneObjects = new Zone[0];
 
+        private static readonly FieldInfo decay = typeof(DecayEntity).GetField("decay", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo decayTimer = typeof(DecayEntity).GetField("decayTimer", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo decayDelayTime = typeof(DecayEntity).GetField("decayDelayTime", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo decayDeltaTime = typeof(DecayEntity).GetField("decayDeltaTime", BindingFlags.Instance | BindingFlags.NonPublic);
+
         private readonly FieldInfo npcNextTick = typeof(NPCAI).GetField("nextTick", (BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.NonPublic));
         //private static readonly int triggerLayer = LayerMask.NameToLayer("Trigger");
         private static readonly int playersMask = LayerMask.GetMask("Player (Server)");
@@ -377,11 +382,11 @@ namespace Oxide.Plugins
             {
                 if (ZoneManagerPlugin.HasZoneFlag(this, ZoneFlags.NoDecay))
                 {
-                    var decay = col.GetComponentInParent<Decay>();
-                    if (decay != null)
+                    var decayEntity = col.GetComponentInParent<DecayEntity>();
+                    if (decayEntity != null && decay.GetValue(decayEntity) != null)
                     {
-                        decay.CancelInvoke("RunDecay");
-                        decay.enabled = false;
+                        decayEntity.CancelInvoke("RunDecay");
+                        decayTimer.SetValue(decayEntity, 0f);
                     }
                 }
                 var resourceDispenser = col.GetComponentInParent<ResourceDispenser>();
@@ -414,8 +419,9 @@ namespace Oxide.Plugins
             {
                 if (ZoneManagerPlugin.HasZoneFlag(this, ZoneFlags.NoDecay))
                 {
-                    var decay = col.GetComponentInParent<Decay>();
-                    if (decay != null) decay.enabled = true;
+                    var decayEntity = col.GetComponentInParent<DecayEntity>();
+                    if (decayEntity != null && decay.GetValue(decayEntity) != null && !decayEntity.IsInvoking("RunDecay"))
+                        decayEntity.InvokeRepeating("RunDecay", (float) decayDelayTime.GetValue(decayEntity), (float) decayDeltaTime.GetValue(decayEntity));
                 }
                 var resourceDispenser = col.GetComponentInParent<ResourceDispenser>();
                 if (resourceDispenser != null)
@@ -754,10 +760,10 @@ namespace Oxide.Plugins
         }
 
         /////////////////////////////////////////
-        // OnRunCommand(ConsoleSystem.Arg arg)
+        // OnServerCommand(ConsoleSystem.Arg arg)
         // Called when a user executes a command
         /////////////////////////////////////////
-        private object OnRunCommand(ConsoleSystem.Arg arg)
+        private object OnServerCommand(ConsoleSystem.Arg arg)
         {
             if (arg.Player() == null) return null;
             if (arg.cmd?.name == null) return null;

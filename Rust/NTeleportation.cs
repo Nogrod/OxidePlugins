@@ -1552,7 +1552,7 @@ namespace Oxide.Plugins
                     BaseEntity entity = null;
                     if (Physics.SphereCast(player.transform.position, .5f, Vector3.down, out hitInfo, 5, blockLayer))
                         entity = hitInfo.GetEntity();
-                    if (entity == null || !entity.LookupPrefabName().Contains("foundation"))
+                    if (entity != null && !entity.LookupPrefabName().Contains("foundation"))
                     {
                         PrintMsgL(player, "AcceptOnRoof");
                         return;

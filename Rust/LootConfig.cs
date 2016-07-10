@@ -18,7 +18,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("LootConfig", "Nogrod", "1.0.11")]
+    [Info("LootConfig", "Nogrod", "1.0.12")]
     internal class LootConfig : RustPlugin
     {
         private const int VersionConfig = 7;
@@ -127,7 +127,6 @@ namespace Oxide.Plugins
             foreach (var reveal in itemModReveal)
             {
                 var items = new List<ItemAmount>();
-                var bps = new List<ItemAmount>();
                 var stack = new Stack<LootSpawn>();
                 stack.Push(reveal.revealList);
                 while (stack.Count > 0)
@@ -142,15 +141,11 @@ namespace Oxide.Plugins
                         continue;
                     }
                     if (lootSpawn.items != null) items.AddRange(lootSpawn.items);
-                    if (lootSpawn.blueprints != null) bps.AddRange(lootSpawn.blueprints);
                 }
                 sb.Clear();
                 sb.AppendLine(reveal.name);
                 sb.AppendLine("Items:");
                 foreach (var item in items)
-                    sb.AppendLine($"\t{item.itemDef.shortname}: {item.amount}");
-                sb.AppendLine("Blueprints:");
-                foreach (var item in bps)
                     sb.AppendLine($"\t{item.itemDef.shortname}: {item.amount}");
                 Puts(sb.ToString());
             }
@@ -266,14 +261,6 @@ namespace Oxide.Plugins
                     sb.AppendLine($"{parentChance:P1} {amount.amount}x {amount.itemDef.shortname} ({lootSpawn.name})");
                 }
             }
-            if (lootSpawn.blueprints != null && lootSpawn.blueprints.Length > 0)
-            {
-                foreach (var amount in lootSpawn.blueprints)
-                {
-                    sb.Append('\t', depth);
-                    sb.AppendLine($"{parentChance:P1} {amount.amount}x {amount.itemDef.shortname} BP ({lootSpawn.name})");
-                }
-            }
         }
 
         private void UpdateLoot()
@@ -371,7 +358,6 @@ namespace Oxide.Plugins
                 reveal.numForReveal = revealConfig.NumForReveal;
                 reveal.revealedItemAmount = revealConfig.RevealedItemAmount;
                 reveal.revealedItemOverride = GetItem(revealConfig.RevealedItemOverride);
-                reveal.asBlueprint = revealConfig.AsBlueprint;
                 reveal.revealList = lootSpawn;
             }
             foreach (var unwrap in itemModUnwraps)
@@ -401,7 +387,7 @@ namespace Oxide.Plugins
         private void UpdateLootContainer(Dictionary<string, LootContainerData> containerData, LootContainer container, Dictionary<string, LootSpawn> lootSpawns)
         {
             LootContainerData containerConfig;
-            if (!containerData.TryGetValue(container.LookupPrefabName(), out containerConfig))
+            if (containerData == null || !containerData.TryGetValue(container.LookupPrefabName(), out containerConfig))
             {
                 Puts("No container data found: {0}", container.LookupPrefabName());
                 return;
@@ -414,7 +400,7 @@ namespace Oxide.Plugins
             container.lootDefinition = GetLootSpawn(containerConfig.LootDefinition, lootSpawns);
             container.inventorySlots = containerConfig.InventorySlots;
             container.SpawnType = containerConfig.SpawnType;
-            if (!container.gameObject.activeInHierarchy) return;
+            if (!container.gameObject.activeInHierarchy || container.inventory == null) return;
             container.inventory.capacity = containerConfig.InventorySlots;
             container.CancelInvoke("SpawnLoot");
             container.SpawnLoot();
@@ -433,10 +419,8 @@ namespace Oxide.Plugins
             lootSpawns[lootSpawnName] = lootSpawn = ScriptableObject.CreateInstance<LootSpawn>();
             lootSpawn.name = lootSpawnName;
             lootSpawn.items = new ItemAmount[lootSpawnData.Items.Length];
-            lootSpawn.blueprints = new ItemAmount[lootSpawnData.Blueprints.Length];
             lootSpawn.subSpawn = new LootSpawn.Entry[lootSpawnData.SubSpawn.Length];
             FillItemAmount(lootSpawn.items, lootSpawnData.Items, lootSpawnName);
-            FillItemAmount(lootSpawn.blueprints, lootSpawnData.Blueprints, lootSpawnName);
             for (var i = 0; i < lootSpawnData.SubSpawn.Length; i++)
             {
                 var subSpawn = lootSpawnData.SubSpawn[i];
@@ -641,8 +625,6 @@ namespace Oxide.Plugins
                 writer.WriteValue(entry.revealedItemOverride?.shortname);
                 writer.WritePropertyName("RevealedItemAmount");
                 writer.WriteValue(entry.revealedItemAmount);
-                writer.WritePropertyName("AsBlueprint");
-                writer.WriteValue(entry.asBlueprint);
                 writer.WritePropertyName("RevealList");
                 writer.WriteValue(entry.revealList.name);
                 writer.WriteEndObject();
@@ -668,7 +650,6 @@ namespace Oxide.Plugins
             public int NumForReveal { get; set; } = 10;
             public string RevealedItemOverride { get; set; }
             public int RevealedItemAmount { get; set; } = 1;
-            public bool AsBlueprint { get; set; }
             public string RevealList { get; set; }
         }
 
@@ -783,8 +764,6 @@ namespace Oxide.Plugins
                 writer.WriteStartObject();
                 writer.WritePropertyName("Items");
                 serializer.Serialize(writer, lootSpawn.items);
-                writer.WritePropertyName("Blueprints");
-                serializer.Serialize(writer, lootSpawn.blueprints);
                 writer.WritePropertyName("SubSpawn");
                 serializer.Serialize(writer, lootSpawn.subSpawn);
                 writer.WriteEndObject();
@@ -808,7 +787,6 @@ namespace Oxide.Plugins
         public class LootSpawnData
         {
             public ItemAmountData[] Items { get; set; } = new ItemAmountData[0];
-            public ItemAmountData[] Blueprints { get; set; } = new ItemAmountData[0];
             public LootSpawnEntryData[] SubSpawn { get; set; } = new LootSpawnEntryData[0];
         }
 

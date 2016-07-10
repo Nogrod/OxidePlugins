@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Friends", "Nogrod", "2.1.0", ResourceId = 686)]
+    [Info("Friends", "Nogrod", "2.1.1", ResourceId = 686)]
     class Friends : RustPlugin
     {
         private readonly FieldInfo whitelistPlayersField = typeof(CodeLock).GetField("whitelistPlayers", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -148,7 +148,7 @@ namespace Oxide.Plugins
             if (ReverseData.TryGetValue(friendId, out friends))
                 friends.Remove(playerId);
             if (configData.CacheTime > 0)
-                playerData.Cached.Add(friendId, Facepunch.Math.Epoch.Current + configData.CacheTime);
+                playerData.Cached[friendId] = Facepunch.Math.Epoch.Current + configData.CacheTime;
             var turrets = UnityEngine.Object.FindObjectsOfType<AutoTurret>();
             foreach (var turret in turrets)
             {
