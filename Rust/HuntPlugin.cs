@@ -26,7 +26,7 @@ using Timer = Oxide.Plugins.Timer;
 namespace Oxide.Plugins
 {
 
-    [Info("Hunt RPG", "PedraozauM / SW / Nogrod", "1.5.7", ResourceId = 841)]
+    [Info("Hunt RPG", "PedraozauM / SW / Nogrod", "1.5.9", ResourceId = 841)]
     public class HuntPlugin : RustPlugin
     {
         [PluginReference]
@@ -340,7 +340,7 @@ namespace Oxide.Plugins
 
         void OnItemDeployed(Deployer deployer, BaseEntity baseEntity)
         {
-            OnEntityDeployedInternal(deployer.ownerPlayer, baseEntity as BaseOven, Data.Furnaces);
+            OnEntityDeployedInternal(deployer.GetOwnerPlayer(), baseEntity as BaseOven, Data.Furnaces);
         }
 
         void OnItemAddedToContainer(ItemContainer container, Item item)
@@ -355,10 +355,10 @@ namespace Oxide.Plugins
         void OnEntityBuilt(Planner planner, GameObject gameObject)
         {
             var entity = gameObject.GetComponent<BaseEntity>();
-            OnEntityDeployedInternal(planner.ownerPlayer, entity as BaseOven, Data.Furnaces);
-            OnEntityDeployedInternal(planner.ownerPlayer, entity as MiningQuarry, Data.Quarries);
+            OnEntityDeployedInternal(planner.GetOwnerPlayer(), entity as BaseOven, Data.Furnaces);
+            OnEntityDeployedInternal(planner.GetOwnerPlayer(), entity as MiningQuarry, Data.Quarries);
             var buildingBlock = entity as BuildingBlock;
-            if (buildingBlock != null) OnStructureUpgrade(buildingBlock, planner.ownerPlayer, buildingBlock.grade);
+            if (buildingBlock != null) OnStructureUpgrade(buildingBlock, planner.GetOwnerPlayer(), buildingBlock.grade);
         }
 
         void OnConsumeFuel(BaseOven oven, Item fuel, ItemModBurnable burnable)
@@ -1869,7 +1869,7 @@ namespace Oxide.Plugins
         {
             var melee = item.GetHeldEntity() as BaseMelee;
             if (melee == null) return;
-            var defaultMelee = GameManager.server.FindPrefab(melee.LookupPrefabName()).GetComponent<BaseMelee>();
+            var defaultMelee = GameManager.server.FindPrefab(melee.PrefabName).GetComponent<BaseMelee>();
             UpdateGatherPropertyEntry(melee.gathering.Tree, defaultMelee.gathering.Tree, rpgInfo, HRK.Lumberjack);
             //SendReply(item.GetOwnerPlayer(), "Item: {0} G: {1:0.00} C: {2:0.00} D: {3:0.00}", item.info.shortname, defaultMelee.gathering.Tree.gatherDamage, defaultMelee.gathering.Tree.conditionLost, defaultMelee.gathering.Tree.destroyFraction);
             //SendReply(item.GetOwnerPlayer(), "Item: {0} G: {1:0.00} C: {2:0.00} D: {3:0.00}", item.info.shortname, melee.gathering.Tree.gatherDamage, melee.gathering.Tree.conditionLost, melee.gathering.Tree.destroyFraction);
@@ -2137,7 +2137,7 @@ namespace Oxide.Plugins
 
         private static string EntityName(BaseEntity entity)
         {
-            var name = entity.LookupShortPrefabName();
+            var name = entity.ShortPrefabName;
             var pos = name.LastIndexOf(".", StringComparison.Ordinal);
             if (pos >= 0) name = name.Substring(0, pos);
             return name;

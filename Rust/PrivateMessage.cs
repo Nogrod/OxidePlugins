@@ -1,19 +1,21 @@
 using System.Collections.Generic;
 using System.Globalization;
-
+using Oxide.Core;
 using Oxide.Core.Plugins;
 
 using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("PrivateMessage", "Nogrod", "2.0.1", ResourceId = 659)]
+    [Info("PrivateMessage", "Nogrod", "2.0.4", ResourceId = 659)]
     class PrivateMessage : RustPlugin
     {
         private readonly Dictionary<ulong, ulong> pmHistory = new Dictionary<ulong, ulong>();
 
         [PluginReference]
         private Plugin Ignore;
+        [PluginReference]
+        private Plugin BetterChat;
 
         private void Init()
         {
@@ -42,9 +44,6 @@ namespace Oxide.Plugins
             if (args.Length > 1)
             {
                 var name = args[0];
-                var msg = string.Empty;
-                for (var i = 1; i < args.Length; i++)
-                    msg = $"{msg} {args[i]}";
                 var p = FindPlayer(name);
                 if (p == player)
                 {
@@ -53,16 +52,31 @@ namespace Oxide.Plugins
                 }
                 if (p != null)
                 {
+                    if (!(bool) (Interface.Oxide.CallHook("CanChat", player) ?? true))
+                    {
+                        SendReply(player, "You are not allowed to chat here");
+                        return;
+                    }
                     var hasIgnore = Ignore?.CallHook("HasIgnored", p.userID, player.userID);
                     if (hasIgnore != null && (bool) hasIgnore)
                     {
                         PrintMessage(player, "IgnoreYou", p.displayName);
                         return;
                     }
+                    hasIgnore = BetterChat?.CallHook("API_PlayerIgnores", p.UserIDString, player.UserIDString);
+                    if (hasIgnore != null && (bool)hasIgnore)
+                    {
+                        PrintMessage(player, "IgnoreYou", p.displayName);
+                        return;
+                    }
+                    var msg = string.Empty;
+                    for (var i = 1; i < args.Length; i++)
+                        msg = $"{msg} {args[i]}";
                     pmHistory[player.userID] = p.userID;
                     pmHistory[p.userID] = player.userID;
                     PrintMessage(player, "PMTo", p.displayName, msg);
                     PrintMessage(p, "PMFrom", player.displayName, msg);
+                    Effect.server.Run("assets/prefabs/locks/keypad/effects/lock.code.updated.prefab", p, 0, Vector3.zero, Vector3.zero);
                     Puts("[PM]{0}->{1}:{2}", player.displayName, p.displayName, msg);
                 }
                 else
@@ -77,23 +91,35 @@ namespace Oxide.Plugins
         {
             if (args.Length > 0)
             {
-                var msg = string.Empty;
-                for (var i = 0; i < args.Length; i++)
-                    msg = $"{msg} {args[i]}";
                 ulong steamid;
                 if (pmHistory.TryGetValue(player.userID, out steamid))
                 {
                     var p = FindPlayer(steamid);
                     if (p != null)
                     {
+                        if (!(bool) (Interface.Oxide.CallHook("CanChat", player) ?? true))
+                        {
+                            SendReply(player, "You are not allowed to chat here");
+                            return;
+                        }
                         var hasIgnore = Ignore?.CallHook("HasIgnored", p.userID, player.userID);
                         if (hasIgnore != null && (bool)hasIgnore)
                         {
                             PrintMessage(player, "IgnoreYou", p.displayName);
                             return;
                         }
+                        hasIgnore = BetterChat?.CallHook("API_PlayerIgnores", p.UserIDString, player.UserIDString);
+                        if (hasIgnore != null && (bool)hasIgnore)
+                        {
+                            PrintMessage(player, "IgnoreYou", p.displayName);
+                            return;
+                        }
+                        var msg = string.Empty;
+                        for (var i = 0; i < args.Length; i++)
+                            msg = $"{msg} {args[i]}";
                         PrintMessage(player, "PMTo", p.displayName, msg);
                         PrintMessage(p, "PMFrom", player.displayName, msg);
+                        Effect.server.Run("assets/prefabs/locks/keypad/effects/lock.code.updated.prefab", p, 0, Vector3.zero, Vector3.zero);
                         Puts("[PM]{0}->{1}:{2}", player.displayName, p.displayName, msg);
                     }
                     else

@@ -11,6 +11,7 @@ namespace Oxide.Plugins
     class BlockRemover : RustPlugin
     {
         private ConfigData configData;
+        private readonly FieldInfo entityListField = typeof(BaseNetworkable.EntityRealm).GetField("entityList", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo instancesField = typeof(MeshColliderBatch).GetField("instances", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly Collider[] colBuffer = (Collider[])typeof(Vis).GetField("colBuffer", (BindingFlags.Static | BindingFlags.NonPublic)).GetValue(null);
         private const string PermCount = "blockremover.count";
@@ -141,7 +142,7 @@ namespace Oxide.Plugins
         HashSet<BuildingBlock> FindAllBuildingBlocks(BuildingGrade.Enum grade)
         {
             var started_at = Time.realtimeSinceStartup;
-            var blocks = new HashSet<BuildingBlock>(BaseNetworkable.serverEntities.entityList.Values.OfType<BuildingBlock>().Where(block => block.grade == grade));
+            var blocks = new HashSet<BuildingBlock>(((ListDictionary<uint, BaseNetworkable>)entityListField.GetValue(BaseNetworkable.serverEntities)).Values.OfType<BuildingBlock>().Where(block => block.grade == grade));
             Puts($"Finding {blocks.Count} {grade} blocks took {Time.realtimeSinceStartup - started_at:0.000} seconds");
             return blocks;
         }
@@ -149,7 +150,7 @@ namespace Oxide.Plugins
         HashSet<StabilityEntity> FindAllStabilityEntities()
         {
             var started_at = Time.realtimeSinceStartup;
-            var stabilityEntities = new HashSet<StabilityEntity>(BaseNetworkable.serverEntities.entityList.Values.OfType<StabilityEntity>());
+            var stabilityEntities = new HashSet<StabilityEntity>(((ListDictionary<uint, BaseNetworkable>)entityListField.GetValue(BaseNetworkable.serverEntities)).Values.OfType<StabilityEntity>());
             Puts($"Finding {stabilityEntities.Count} blocks took {Time.realtimeSinceStartup - started_at:0.000} seconds");
             return stabilityEntities;
         }

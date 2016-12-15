@@ -20,7 +20,7 @@ using Rust;
 
 namespace Oxide.Plugins
 {
-    [Info("ZoneManager", "Reneb / Nogrod", "2.4.3", ResourceId = 739)]
+    [Info("ZoneManager", "Reneb / Nogrod", "2.4.8", ResourceId = 739)]
     public class ZoneManager : RustPlugin
     {
         private const string PermZone = "zonemanager.zone";
@@ -221,7 +221,12 @@ namespace Oxide.Plugins
                 gameObject.SetActive(Info.Enabled);
                 enabled = Info.Enabled;
 
-                if (ZoneManagerPlugin.HasZoneFlag(this, ZoneFlags.AutoLights))
+                if (ZoneManagerPlugin.HasZoneFlag(this, ZoneFlags.AlwaysLights))
+                {
+                    if (IsInvoking("CheckAlwaysLights")) CancelInvoke("CheckAlwaysLights");
+                    InvokeRepeating("CheckAlwaysLights", 5f, 60f);
+                }
+                else if (ZoneManagerPlugin.HasZoneFlag(this, ZoneFlags.AutoLights))
                 {
                     var currentTime = GetSkyHour();
 
@@ -237,19 +242,38 @@ namespace Oxide.Plugins
                 if (Info.Radiation > 0)
                 {
                     radiation = radiation ?? gameObject.AddComponent<TriggerRadiation>();
-                    radiation.RadiationAmount = Info.Radiation;
+                    radiation.RadiationAmountOverride = Info.Radiation;
                     radiation.radiationSize = Info.Radius;
                     radiation.interestLayers = playersMask;
                     radiation.enabled = Info.Enabled;
                 }
                 else if (radiation != null)
                 {
-                    radiation.RadiationAmount = 0;
+                    radiation.RadiationAmountOverride = 0;
                     radiation.radiationSize = 0;
                     radiation.interestLayers = playersMask;
                     radiation.enabled = false;
                     //Destroy(radiation);
                 }
+
+                var comfort = gameObject.GetComponent<TriggerComfort>();
+                if (Info.Comfort > 0)
+                {
+                    comfort = comfort ?? gameObject.AddComponent<TriggerComfort>();
+                    comfort.baseComfort = Info.Comfort;
+                    comfort.triggerSize = Info.Radius;
+                    comfort.interestLayers = playersMask;
+                    comfort.enabled = Info.Enabled;
+                }
+                else if (comfort != null)
+                {
+                    comfort.baseComfort = 0;
+                    comfort.triggerSize = 0;
+                    comfort.interestLayers = playersMask;
+                    comfort.enabled = false;
+                    //Destroy(comfort);
+                }
+
                 if (IsInvoking("CheckEntites")) CancelInvoke("CheckEntites");
                 InvokeRepeating("CheckEntites", 10f, 10f);
                 /*if (HasAnyFlag(info.flags, ZoneFlags.Eject | ZoneFlags.EjectSleepers
@@ -293,6 +317,7 @@ namespace Oxide.Plugins
             private void OnDestroy()
             {
                 CancelInvoke("CheckLights");
+                CancelInvoke("CheckAlwaysLights");
                 ZoneManagerPlugin.OnZoneDestroy(this);
                 ZoneManagerPlugin = null;
                 Destroy(gameObject);
@@ -314,7 +339,7 @@ namespace Oxide.Plugins
                             continue;
                         }
                         var door = building as Door;
-                        if (door != null && door.LookupPrefabName().Contains("shutter"))
+                        if (door != null && door.PrefabName.Contains("shutter"))
                             door.SetFlag(BaseEntity.Flags.Open, true);
                     }
                     foreach (var player in players)
@@ -343,7 +368,7 @@ namespace Oxide.Plugins
                             continue;
                         }
                         var door = building as Door;
-                        if (door != null && door.LookupPrefabName().Contains("shutter"))
+                        if (door != null && door.PrefabName.Contains("shutter"))
                             door.SetFlag(BaseEntity.Flags.Open, false);
                     }
                     var fuel = ItemManager.FindItemDefinition("lowgradefuel");
@@ -368,13 +393,23 @@ namespace Oxide.Plugins
                     lightsOn = true;
                 }
             }
+            private void CheckAlwaysLights()
+            {
+                if (ZoneManagerPlugin == null) return;
+                foreach (var building in buildings)
+                {
+                    var oven = building as BaseOven;
+                    if (oven == null || oven.IsInvoking("Cook")) continue;
+                    oven.SetFlag(BaseEntity.Flags.On, true);
+                }
+            }
 
             public void OnEntityKill(BaseCombatEntity entity)
             {
                 var player = entity as BasePlayer;
                 if (player != null)
                     players.Remove(player);
-                else if (!(entity is LootContainer) && !(entity is BaseHelicopter) && !(entity is BaseNPC))
+                else if (entity != null && !(entity is LootContainer) && !(entity is BaseHelicopter) && !(entity is BaseNPC))
                     buildings.Remove(entity);
             }
 
@@ -502,6 +537,7 @@ namespace Oxide.Plugins
             public string Name;
             public float Radius;
             public float Radiation;
+            public float Comfort;
             public Vector3 Location;
             public Vector3 Size;
             public Vector3 Rotation;
@@ -524,39 +560,43 @@ namespace Oxide.Plugins
 
         }
         [Flags]
-        public enum ZoneFlags// : long
+        public enum ZoneFlags : ulong
         {
-            None = 0,
-            AutoLights = 1,
-            Eject = 1 << 1,
-            PvpGod = 1 << 2,
-            PveGod = 1 << 3,
-            SleepGod = 1 << 4,
-            UnDestr = 1 << 5,
-            NoBuild = 1 << 6,
-            NoTp = 1 << 7,
-            NoChat = 1 << 8,
-            NoGather = 1 << 9,
-            NoPve = 1 << 10,
-            NoWounded = 1 << 11,
-            NoDecay = 1 << 12,
-            NoDeploy = 1 << 13,
-            NoKits = 1 << 14,
-            NoBoxLoot = 1 << 15,
-            NoPlayerLoot = 1 << 16,
-            NoCorpse = 1 << 17,
-            NoSuicide = 1 << 18,
-            NoRemove = 1 << 19,
-            NoBleed = 1 << 20,
-            KillSleepers = 1 << 21,
-            NpcFreeze = 1 << 22,
-            NoDrown = 1 << 23,
-            NoStability = 1 << 24,
-            NoUpgrade = 1 << 25,
-            EjectSleepers = 1 << 26,
-            NoPickup = 1 << 27,
-            NoCollect = 1 << 28,
-            NoDrop = 1 << 29
+            None = 0L,
+            AutoLights = 1UL,
+            Eject = 1UL << 1,
+            PvpGod = 1UL << 2,
+            PveGod = 1UL << 3,
+            SleepGod = 1UL << 4,
+            UnDestr = 1UL << 5,
+            NoBuild = 1UL << 6,
+            NoTp = 1UL << 7,
+            NoChat = 1UL << 8,
+            NoGather = 1UL << 9,
+            NoPve = 1UL << 10,
+            NoWounded = 1UL << 11,
+            NoDecay = 1UL << 12,
+            NoDeploy = 1UL << 13,
+            NoKits = 1UL << 14,
+            NoBoxLoot = 1UL << 15,
+            NoPlayerLoot = 1UL << 16,
+            NoCorpse = 1UL << 17,
+            NoSuicide = 1UL << 18,
+            NoRemove = 1UL << 19,
+            NoBleed = 1UL << 20,
+            KillSleepers = 1UL << 21,
+            NpcFreeze = 1UL << 22,
+            NoDrown = 1UL << 23,
+            NoStability = 1UL << 24,
+            NoUpgrade = 1UL << 25,
+            EjectSleepers = 1UL << 26,
+            NoPickup = 1UL << 27,
+            NoCollect = 1UL << 28,
+            NoDrop = 1UL << 29,
+			Kill = 1UL << 30,
+            NoCup = 1UL << 31,
+            AlwaysLights = 1UL << 32,
+            NoTrade = 1UL << 33
         }
 
         private bool HasZoneFlag(Zone zone, ZoneFlags flag)
@@ -619,7 +659,8 @@ namespace Oxide.Plugins
             for (var i = 0; i < collectibleEntities.Length; i++)
             {
                 var collectibleEntity = collectibleEntities[i];
-                if (collectibleEntity.GetComponent<Collider>() == null) collectibleEntity.gameObject.AddComponent<BoxCollider>();
+                var collider = collectibleEntity.GetComponent<Collider>() ?? collectibleEntity.gameObject.AddComponent<BoxCollider>();
+                collider.isTrigger = true;
             }
         }
 
@@ -692,6 +733,11 @@ namespace Oxide.Plugins
         private void OnServerInitialized()
         {
             if (Initialized) return;
+            var values = Enum.GetValues(typeof(ZoneFlags)).Cast<ZoneFlags>();
+            foreach (var flagse in values)
+            {
+                Puts("{0} {1}", flagse, (ulong)flagse);
+            }
             timer.In(1, () => {
                 SetupCollectibleEntity();
                 foreach (var zoneDefinition in ZoneDefinitions.Values)
@@ -706,11 +752,12 @@ namespace Oxide.Plugins
         /////////////////////////////////////////
         private void OnEntityBuilt(Planner planner, GameObject gameobject)
         {
-            if (planner.ownerPlayer == null) return;
-            if (HasPlayerFlag(planner.ownerPlayer, ZoneFlags.NoBuild) && !hasPermission(planner.ownerPlayer, PermCanBuild))
+            var player = planner.GetOwnerPlayer();
+            if (player == null) return;
+            if (HasPlayerFlag(player, ZoneFlags.NoBuild) && !hasPermission(player, PermCanBuild))
             {
                 gameobject.GetComponentInParent<BaseCombatEntity>().Kill(BaseNetworkable.DestroyMode.Gib);
-                SendMessage(planner.ownerPlayer, "You are not allowed to build here");
+                SendMessage(player, "You are not allowed to build here");
             }
         }
 
@@ -726,11 +773,17 @@ namespace Oxide.Plugins
         /////////////////////////////////////////
         private void OnItemDeployed(Deployer deployer, BaseEntity deployedEntity)
         {
-            if (deployer.ownerPlayer == null) return;
-            if (HasPlayerFlag(deployer.ownerPlayer, ZoneFlags.NoDeploy) && !hasPermission(deployer.ownerPlayer, PermCanDeploy))
+            var player = deployer.GetOwnerPlayer();
+            if (player == null) return;
+            if (HasPlayerFlag(player, ZoneFlags.NoDeploy) && !hasPermission(player, PermCanDeploy))
             {
                 deployedEntity.Kill(BaseNetworkable.DestroyMode.Gib);
-                SendMessage(deployer.ownerPlayer, "You are not allowed to deploy here");
+                SendMessage(player, "You are not allowed to deploy here");
+            }
+            else if (HasPlayerFlag(player, ZoneFlags.NoCup) && deployedEntity.PrefabName.Contains("cupboard"))
+            {
+                deployedEntity.Kill(BaseNetworkable.DestroyMode.Gib);
+                SendMessage(player, "You are not allowed to deploy here");
             }
         }
 
@@ -806,7 +859,10 @@ namespace Oxide.Plugins
             foreach (var zone in resourceZone)
             {
                 if (HasZoneFlag(zone, ZoneFlags.NoGather))
+                {
                     hitinfo.HitEntity = null;
+                    break;
+                }
             }
         }
 
@@ -856,8 +912,9 @@ namespace Oxide.Plugins
             }
             if (!(entity is LootContainer) && !(entity is BaseHelicopter))
             {
+                var resource = entity.GetComponent<ResourceDispenser>();
                 HashSet<Zone> zones;
-                if (!buildingZones.TryGetValue(entity, out zones)) return;
+                if (!buildingZones.TryGetValue(entity, out zones) && (resource == null || !resourceZones.TryGetValue(resource, out zones))) return;
                 foreach (var zone in zones)
                 {
                     if (HasZoneFlag(zone, ZoneFlags.UnDestr))
@@ -961,9 +1018,9 @@ namespace Oxide.Plugins
                     }
                 }
             }
-            var npc = entity.GetComponent<NPCAI>();
-            if (npc != null)
-                npcNextTick.SetValue(npc, Time.time + 10f);
+            var npcai = entity.GetComponent<NPCAI>();
+            if (npcai != null)
+                npcNextTick.SetValue(npcai, Time.time + 10f);
         }
 
         /////////////////////////////////////////
@@ -972,7 +1029,7 @@ namespace Oxide.Plugins
         /////////////////////////////////////////
         private object CanLootPlayer(BasePlayer target, BasePlayer looter)
         {
-            return OnLootPlayerInternal(looter, target) ? null : (object)false;
+            return OnLootPlayerInternal(looter, target) ? null : (object) false;
         }
 
         private void OnLootPlayer(BasePlayer looter, BasePlayer target)
@@ -1003,8 +1060,7 @@ namespace Oxide.Plugins
 
         private object CanBeWounded(BasePlayer player, HitInfo hitinfo)
         {
-            if (HasPlayerFlag(player, ZoneFlags.NoWounded)) return false;
-            return null;
+            return HasPlayerFlag(player, ZoneFlags.NoWounded) ? (object) false : null;
         }
 
         /////////////////////////////////////////
@@ -1013,30 +1069,27 @@ namespace Oxide.Plugins
 
         private object canRedeemKit(BasePlayer player)
         {
-            if (HasPlayerFlag(player, ZoneFlags.NoKits)) { return "You may not redeem a kit inside this area"; }
-            return null;
+            return HasPlayerFlag(player, ZoneFlags.NoKits) ? "You may not redeem a kit inside this area" : null;
         }
 
         private object CanTeleport(BasePlayer player)
         {
-            if (HasPlayerFlag(player, ZoneFlags.NoTp)) { return "You may not teleport in this area"; }
-            return null;
+            return HasPlayerFlag(player, ZoneFlags.NoTp) ? "You may not teleport in this area" : null;
         }
 
         private object canRemove(BasePlayer player)
         {
-            if (HasPlayerFlag(player, ZoneFlags.NoRemove)) { return "You may not use the remover tool in this area"; }
-            return null;
+            return HasPlayerFlag(player, ZoneFlags.NoRemove) ? "You may not use the remover tool in this area" : null;
         }
 
         private bool CanChat(BasePlayer player)
         {
-            if (HasPlayerFlag(player, ZoneFlags.NoChat))
-            {
-                //SendMessage(player, "You are not allowed to chat here");
-                return false;
-            }
-            return true;
+            return !HasPlayerFlag(player, ZoneFlags.NoChat);
+        }
+
+        private object CanTrade(BasePlayer player)
+        {
+            return HasPlayerFlag(player, ZoneFlags.NoTrade) ? "You may not trade in this area" : null;
         }
 
         private void UpdateZoneDefinition(ZoneDefinition zone, string[] args, BasePlayer player = null)
@@ -1051,6 +1104,9 @@ namespace Oxide.Plugins
                         break;
                     case "id":
                         editvalue = zone.Id = args[i + 1];
+                        break;
+                    case "comfort":
+                        editvalue = zone.Comfort = Convert.ToSingle(args[i + 1]);
                         break;
                     case "radiation":
                         editvalue = zone.Radiation = Convert.ToSingle(args[i + 1]);
@@ -1178,6 +1234,7 @@ namespace Oxide.Plugins
             {
                 { "name", zone.Info.Name },
                 { "ID", zone.Info.Id },
+                { "comfort", zone.Info.Comfort.ToString() },
                 { "radiation", zone.Info.Radiation.ToString() },
                 { "radius", zone.Info.Radius.ToString() },
                 { "rotation", zone.Info.Rotation.ToString() },
@@ -1287,6 +1344,7 @@ namespace Oxide.Plugins
         /////////////////////////////////////////
         private object GetZoneRadius(string zoneID) => GetZoneByID(zoneID)?.Info.Radius;
         private object GetZoneSize(string zoneID) => GetZoneByID(zoneID)?.Info.Size;
+        private object GetZoneName(string zoneID) => GetZoneByID(zoneID)?.Info.Name;
         private object CheckZoneID(string zoneID) => GetZoneByID(zoneID)?.Info.Id;
         private object GetZoneIDs() => zoneObjects.ToList().ConvertAll(z => z.Info.Id).ToArray();
         private Vector3 GetZoneLocation(string zoneId) => GetZoneByID(zoneId)?.Info.Location ?? Vector3.zero;
@@ -1341,6 +1399,47 @@ namespace Oxide.Plugins
                 var flag = (ZoneFlags)Enum.Parse(typeof(ZoneFlags), flagString, true);
                 zone.disabledFlags &= ~flag;
                 UpdateAllPlayers();
+            }
+            catch
+            {
+            }
+        }
+
+        private bool HasFlag(string zoneId, string flagString)
+        {
+            try
+            {
+                var zone = GetZoneByID(zoneId);
+                var flag = (ZoneFlags) Enum.Parse(typeof(ZoneFlags), flagString, true);
+                if (HasZoneFlag(zone, flag))
+                    return true;
+            }
+            catch
+            {
+            }
+            return false;
+        }
+
+        private void AddFlag(string zoneId, string flagString)
+        {
+            try
+            {
+                var zone = GetZoneByID(zoneId);
+                var flag = (ZoneFlags) Enum.Parse(typeof(ZoneFlags), flagString, true);
+                AddZoneFlag(zone.Info, flag);
+            }
+            catch
+            {
+            }
+        }
+
+        private void RemoveFlag(string zoneId, string flagString)
+        {
+            try
+            {
+                var zone = GetZoneByID(zoneId);
+                var flag = (ZoneFlags) Enum.Parse(typeof(ZoneFlags), flagString, true);
+                RemoveZoneFlag(zone.Info, flag);
             }
             catch
             {
@@ -1439,6 +1538,7 @@ namespace Oxide.Plugins
             if (HasZoneFlag(zone, ZoneFlags.Eject)) EjectPlayer(zone, player);
             Interface.Oxide.CallHook("OnEnterZone", zone.Info.Id, player);
             //Puts("OnPlayerEnterZone: {0}", player.GetType());
+			if (HasPlayerFlag(player, ZoneFlags.Kill) && !isAdmin(player)) player.Die();
         }
 
         private void OnPlayerExitZone(Zone zone, BasePlayer player, bool all = false)
@@ -1510,7 +1610,11 @@ namespace Oxide.Plugins
                 npcZones[entity] = zones = new HashSet<Zone>();
             if (!zones.Add(zone)) return;
             if (HasZoneFlag(zone, ZoneFlags.NpcFreeze))
-                npcNextTick.SetValue(entity, 999999999999f);
+            {
+                var npcai = entity.GetComponent<NPCAI>();
+                if (npcai != null)
+                    npcNextTick.SetValue(npcai, 999999999999f);
+            }
             //Puts("OnNpcEnterZone: {0}", entity.GetType());
         }
 
@@ -1528,7 +1632,9 @@ namespace Oxide.Plugins
                 foreach (var zone1 in zones)
                 {
                     if (!HasZoneFlag(zone1, ZoneFlags.NpcFreeze)) continue;
-                    npcNextTick.SetValue(entity, Time.time);
+                    var npcai = entity.GetComponent<NPCAI>();
+                    if (npcai != null)
+                        npcNextTick.SetValue(npcai, Time.time);
                     break;
                 }
                 npcZones.Remove(entity);
@@ -1584,14 +1690,14 @@ namespace Oxide.Plugins
                 var block = entity as StabilityEntity;
                 if (block == null) return;
                 var prefab = GameManager.server.FindPrefab(PrefabAttribute.server.Find<Construction>(block.prefabID).fullName);
-                block.grounded = prefab.GetComponent<StabilityEntity>()?.grounded ?? false;
+                block.grounded = prefab?.GetComponent<StabilityEntity>()?.grounded ?? false;
             }
             if (pickup)
             {
                 var door = entity as Door;
                 if (door == null) return;
                 var prefab = GameManager.server.FindPrefab(PrefabAttribute.server.Find<Construction>(door.prefabID).fullName);
-                door.pickup.enabled = prefab.GetComponent<Door>()?.pickup.enabled ?? true;
+                door.pickup.enabled = prefab?.GetComponent<Door>()?.pickup.enabled ?? true;
             }
             //Puts("OnBuildingExitZone: {0}", entity.GetType());
         }
@@ -1849,6 +1955,7 @@ namespace Oxide.Plugins
                 SendMessage(player, $"name => {zoneDefinition.Name}");
                 SendMessage(player, $"enabled => {zoneDefinition.Enabled}");
                 SendMessage(player, $"ID => {zoneDefinition.Id}");
+                SendMessage(player, $"comfort => {zoneDefinition.Comfort}");
                 SendMessage(player, $"radiation => {zoneDefinition.Radiation}");
                 SendMessage(player, $"radius => {zoneDefinition.Radius}");
                 SendMessage(player, $"Location => {zoneDefinition.Location}");

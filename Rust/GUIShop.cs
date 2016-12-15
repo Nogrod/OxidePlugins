@@ -126,6 +126,7 @@ namespace Oxide.Plugins
         private Dictionary<string, ItemData> ShopCategories = new Dictionary<string, ItemData>();
         private Dictionary<string, object> Shops = DefaultShops();
         private bool Balance;
+        private bool Logging;
         private string IconUrl = string.Empty;
 
         string MessageShowNoEconomics = "Couldn't get informations out of Economics. Is it installed?";
@@ -157,6 +158,7 @@ namespace Oxide.Plugins
             CheckCfg("Shop - Shop Icon Url", ref IconUrl);
             CheckCfg("Shop - Shop List", ref Shops);
             CheckCfg("Shop - Balance", ref Balance);
+            CheckCfg("Shop - Logging", ref Logging);
             CheckCfg("Message - Error - No Econonomics", ref MessageShowNoEconomics);
             CheckCfg("Message - Bought", ref MessageBought);
             CheckCfg("Message - Sold", ref MessageSold);
@@ -411,7 +413,7 @@ namespace Oxide.Plugins
                     RectTransform = {AnchorMin = $"{(sell ? 0.775 : 0.5) + i*0.03 + 0.001} {ymin}", AnchorMax = $"{(sell ? 0.805 : 0.53) + i*0.03 - 0.001} {ymax}"},
                     Text = {Text = steps[i].ToString(), FontSize = 15, Align = TextAnchor.MiddleCenter}
                 }, ShopContentName);
-                //if (cooldown) break;
+                if (cooldown) break;
             }
             if (!cooldown)
             {
@@ -617,9 +619,9 @@ namespace Oxide.Plugins
                         }
                     }
                     if (!buyed && pair.Value.ContainsKey("buy"))
-                        container.AddRange(CreateShopItemEntry(GetBuyPrice(data).ToString(), pos + 0.125f, pos, $"'{shopid}'", $"'{pair.Key}'", "0 0.6 0 0.1", false, cooldown));
+                        container.AddRange(CreateShopItemEntry(GetBuyPrice(data).ToString(), pos + 0.125f, pos, $"'{shopid}'", $"'{pair.Key}'", "0 0.6 0 0.1", false, data.Cmd != null));
                     if (pair.Value.ContainsKey("sell"))
-                        container.AddRange(CreateShopItemEntry(GetSellPrice(data).ToString(), pos + 0.125f, pos, $"'{shopid}'", $"'{pair.Key}'", "1 0 0 0.1", true, cooldown));
+                        container.AddRange(CreateShopItemEntry(GetSellPrice(data).ToString(), pos + 0.125f, pos, $"'{shopid}'", $"'{pair.Key}'", "1 0 0 0.1", true, data.Cmd != null));
                 }
                 current++;
             }
@@ -651,7 +653,7 @@ namespace Oxide.Plugins
             ulong sell;
             if (!selled.TryGetValue(itemname, out sell))
                 sell = 1;
-            return Math.Min(Math.Max(buy / (double)sell, .25), 4);
+            return Math.Min(Math.Max(buy / (double)sell, .5), 2);
         }
 
         private static string FormatTime(long seconds)
@@ -733,12 +735,12 @@ namespace Oxide.Plugins
                 {
                     object successkit = Kits.CallHook("GiveKit", player, data.Shortname);
                     if (successkit is bool && !(bool)successkit) return MessageErrorRedeemKit;
-                    Puts("Player: {0} Buyed Kit: {1}", player.displayName, data.Shortname);
+                    if (Logging) Puts("Player: {0} Buyed Kit: {1}", player.displayName, data.Shortname);
                     return true;
                 }
                 object success = GiveItem(player, data, amount, player.inventory.containerMain);
                 if (success is string) return success;
-                Puts("Player: {0} Buyed Item: {1} x{2}", player.displayName, data.Shortname, amount);
+                if (Logging) Puts("Player: {0} Buyed Item: {1} x{2}", player.displayName, data.Shortname, amount);
             }
             if (data.Cmd != null)
             {
@@ -756,7 +758,7 @@ namespace Oxide.Plugins
                     else
                         ConsoleSystem.Run.Server.Normal(c);
                 }
-                Puts("Player: {0} Buyed command: {1}", player.displayName, item);
+                if (Logging) Puts("Player: {0} Buyed command: {1}", player.displayName, item);
             }
             return true;
         }
@@ -867,7 +869,7 @@ namespace Oxide.Plugins
             if (iskit is bool && (bool)iskit) return "You can't sell kits";
             object success = TakeItem(player, data, amount);
             if (success is string) return success;
-            Puts("Player: {0} Selled Item: {1} x{2}", player.displayName, data.Shortname, amount);
+            if (Logging) Puts("Player: {0} Selled Item: {1} x{2}", player.displayName, data.Shortname, amount);
             return true;
         }
 

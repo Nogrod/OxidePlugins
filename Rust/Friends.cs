@@ -12,7 +12,7 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("Friends", "Nogrod", "2.1.1", ResourceId = 686)]
+    [Info("Friends", "Nogrod", "2.1.2", ResourceId = 686)]
     class Friends : RustPlugin
     {
         private readonly FieldInfo whitelistPlayersField = typeof(CodeLock).GetField("whitelistPlayers", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -51,7 +51,7 @@ namespace Oxide.Plugins
                 MaxFriends = 30,
                 ShareCodeLocks = false,
                 ShareAutoTurrets = false,
-                CacheTime = 60 * 60 * 24
+                CacheTime = 0//60 * 60 * 24
             };
             Config.WriteObject(config, true);
         }
@@ -129,6 +129,7 @@ namespace Oxide.Plugins
             if (playerData.Friends.Count >= configData.MaxFriends || !playerData.Friends.Add(friendId)) return false;
             AddFriendReverse(playerId, friendId);
             SaveFriends();
+            Interface.Oxide.CallHook("OnFriendAdded", playerId, friendId);
             return true;
         }
 
@@ -149,21 +150,28 @@ namespace Oxide.Plugins
                 friends.Remove(playerId);
             if (configData.CacheTime > 0)
                 playerData.Cached[friendId] = Facepunch.Math.Epoch.Current + configData.CacheTime;
-            var turrets = UnityEngine.Object.FindObjectsOfType<AutoTurret>();
-            foreach (var turret in turrets)
+            if (configData.ShareAutoTurrets)
             {
-                if (turret.OwnerID != playerId) continue;
-                turret.authorizedPlayers.RemoveAll(a => a.userid == friendId);
+                var turrets = UnityEngine.Object.FindObjectsOfType<AutoTurret>();
+                foreach (var turret in turrets)
+                {
+                    if (turret.OwnerID != playerId) continue;
+                    turret.authorizedPlayers.RemoveAll(a => a.userid == friendId);
+                }
             }
-            var codeLocks = UnityEngine.Object.FindObjectsOfType<CodeLock>();
-            foreach (var codeLock in codeLocks)
+            if (configData.ShareCodeLocks)
             {
-                var entity = codeLock.GetParentEntity();
-                if (entity == null || entity.OwnerID != playerId) continue;
-                var whitelistPlayers = (List<ulong>)whitelistPlayersField.GetValue(codeLock);
-                whitelistPlayers.RemoveAll(a => a == friendId);
+                var codeLocks = UnityEngine.Object.FindObjectsOfType<CodeLock>();
+                foreach (var codeLock in codeLocks)
+                {
+                    var entity = codeLock.GetParentEntity();
+                    if (entity == null || entity.OwnerID != playerId) continue;
+                    var whitelistPlayers = (List<ulong>) whitelistPlayersField.GetValue(codeLock);
+                    whitelistPlayers.RemoveAll(a => a == friendId);
+                }
             }
             SaveFriends();
+            Interface.Oxide.CallHook("OnFriendRemoved", playerId, friendId);
             return true;
         }
 
@@ -247,6 +255,17 @@ namespace Oxide.Plugins
         {
             var playerData = GetPlayerData(friendId);
             return playerData.Friends.Contains(playerId) || playerData.IsCached(playerId);
+        }
+
+        private string[] GetFriendsS(string playerS)
+        {
+            var playerId = Convert.ToUInt64(playerS);
+            return GetPlayerData(playerId).Friends.ToList().ConvertAll(f => f.ToString()).ToArray();
+        }
+
+        private ulong[] GetFriends(ulong playerId)
+        {
+            return GetPlayerData(playerId).Friends.ToArray();
         }
 
         private string[] GetFriendListS(string playerS)

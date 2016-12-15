@@ -227,7 +227,7 @@ namespace Oxide.Plugins
                             {
                                 { "RefreshRate(s)", "3" },
                             }
-                        }%
+                        }
                     },
                     { "Compass", new PanelConfig
                         {
@@ -1750,7 +1750,7 @@ namespace Oxide.Plugins
             public string Name { get; set; }
 
             [JsonProperty("parent")]
-            public string ParentName { get; set; } = "Overlay";
+            public string ParentName { get; set; } = "Hud";
 
             [JsonProperty("components")]
             public List<ICuiComponent> Components = new List<ICuiComponent>();

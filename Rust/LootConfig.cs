@@ -18,15 +18,15 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("LootConfig", "Nogrod", "1.0.12")]
+    [Info("LootConfig", "Nogrod", "1.0.17")]
     internal class LootConfig : RustPlugin
     {
-        private const int VersionConfig = 7;
+        private const int VersionConfig = 9;
         private readonly FieldInfo ParentSpawnGroupField = typeof (SpawnPointInstance).GetField("parentSpawnGroup", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnGroupsField = typeof (SpawnHandler).GetField("SpawnGroups", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnPointsField = typeof(SpawnGroup).GetField("spawnPoints", BindingFlags.Instance | BindingFlags.NonPublic);
 
-        private readonly Regex _findLoot = new Regex(@"(crate[\-_]normal[\-_\d\w]*|loot[\-_]barrel[\-_\d\w]*|loot[\-_]trash[\-_\d\w]*|heli[\-_]crate[\-_\d\w]*|oil[\-_]barrel[\-_\d\w]*|supply[\-_]drop[\-_\d\w]*|trash[\-_]pile[\-_\d\w]*|/dmloot/.*|giftbox[\-_]loot|stocking[\-_](small|large)[\-_]deployed)\.prefab", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private readonly Regex _findLoot = new Regex(@"(crate[\-_](mine|normal)[\-_\d\w]*(food|medical)*|foodbox[\-_\d\w]*|loot[\-_](barrel|trash)[\-_\d\w]*|heli[\-_]crate[\-_\d\w]*|oil[\-_]barrel[\-_\d\w]*|supply[\-_]drop[\-_\d\w]*|trash[\-_]pile[\-_\d\w]*|/dmloot/.*|giftbox[\-_]loot|stocking[\-_](small|large)[\-_]deployed)\.prefab", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private ConfigData _config;
         private Dictionary<string, ItemDefinition> _itemsDict;
 
@@ -68,8 +68,18 @@ namespace Oxide.Plugins
 #endif
                 GameManager.server.FindPrefab(source);
             }
-            CheckConfig();
+            if (!CheckConfig()) return;
             NextTick(UpdateLoot);
+        }
+
+        private void OnSpawnSubCategory(LootSpawn lootSpawn)
+        {
+            Puts("OnSpawnSubCategory: {0}", lootSpawn.name);
+        }
+
+        private void OnSubCategoryIntoContainer(LootSpawn lootSpawn)
+        {
+            Puts("OnSubCategoryIntoContainer: {0}", lootSpawn.name);
         }
 
         [ConsoleCommand("loot.reload")]
@@ -77,7 +87,7 @@ namespace Oxide.Plugins
         {
             if (!LoadConfig())
                 return;
-            CheckConfig();
+            if (!CheckConfig()) return;
             UpdateLoot();
             Puts("Loot config reloaded.");
         }
@@ -161,25 +171,31 @@ namespace Oxide.Plugins
             var indexes = GetSpawnGroupIndexes(spawnGroups, monuments);
             foreach (var spawnGroup in spawnGroups)
             {
-                Dictionary<string, LootContainer> spawnGroupData;
-                if (!spawnGroupsData.TryGetValue(GetSpawnGroupKey(spawnGroup, monuments, indexes), out spawnGroupData))
-                    spawnGroupsData[GetSpawnGroupKey(spawnGroup, monuments, indexes)] = spawnGroupData = new Dictionary<string, LootContainer>();
+                var spawnGroupKey = GetSpawnGroupKey(spawnGroup, monuments, indexes);
+                if (spawnGroup.prefabs == null) continue;
                 foreach (var entry in spawnGroup.prefabs)
-                    spawnGroupData[entry.prefab.Get().GetComponent<LootContainer>().LookupPrefabName()] = entry.prefab.Get().GetComponent<LootContainer>();
+                {
+                    var container = entry.prefab?.Get()?.GetComponent<LootContainer>();
+                    if (container?.lootDefinition == null) continue;
+                    Dictionary<string, LootContainer> spawnGroupData;
+                    if (!spawnGroupsData.TryGetValue(spawnGroupKey, out spawnGroupData))
+                        spawnGroupsData[spawnGroupKey] = spawnGroupData = new Dictionary<string, LootContainer>();
+                    spawnGroupData[container.PrefabName] = container;
+                }
             }
             var containerData = new Dictionary<string, LootContainer>();
             var allPrefabs = GameManifest.Get().pooledStrings.ToList().ConvertAll(p => p.str).Where(p => _findLoot.IsMatch(p)).ToArray();
             Array.Sort(allPrefabs, (a, b) => caseInsensitiveComparer.Compare(a, b));
             foreach (var strPrefab in allPrefabs)
             {
-                var prefab = GameManager.server.FindPrefab(strPrefab)?.GetComponent<LootContainer>();
-                if (prefab == null) continue;
-                containerData[strPrefab] = prefab;
+                var container = GameManager.server.FindPrefab(strPrefab)?.GetComponent<LootContainer>();
+                if (container?.lootDefinition == null) continue;
+                containerData[strPrefab] = container;
             }
             /*foreach (var container in containers)
             {
                 if (container.gameObject.activeInHierarchy || container.GetComponent<SpawnPointInstance>() != null) continue; //skip spawned & spawn groups
-                containerData[container.LookupPrefabName()] = container;
+                containerData[container.PrefabName] = container;
             }*/
             try
             {
@@ -188,7 +204,7 @@ namespace Oxide.Plugins
                     ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
                     Converters = new List<JsonConverter>
                     {
-                        new ItemAmountConverter(),
+                        new ItemAmountRangedConverter(),
                         new LootSpawnEntryConverter(),
                         new LootContainerConverter(),
                         new LootSpawnConverter(),
@@ -205,7 +221,7 @@ namespace Oxide.Plugins
                     LootContainers = containerData,
                     SpawnGroups = spawnGroupsData.OrderBy(l => l.Key).ToDictionary(l => l.Key, l => l.Value),
                     ItemModReveals = itemModReveal.ToDictionary(l => l.name),
-                    ItemModUnwraps = itemModUnwrap.ToDictionary(l => l.name),
+                    ItemModUnwraps = itemModUnwrap.Where(l => l.revealList != null).ToDictionary(l => l.name),
                     Categories = loot.ToDictionary(l => l.name)
                 });
             }
@@ -218,12 +234,12 @@ namespace Oxide.Plugins
             return LoadConfig();
         }
 
-        private void CheckConfig()
+        private bool CheckConfig()
         {
-            if (_config.Version == Protocol.network && _config.VersionConfig == VersionConfig && _config.WorldSize == World.Size && _config.WorldSeed == World.Seed) return;
+            if (_config.Version == Protocol.network && _config.VersionConfig == VersionConfig && _config.WorldSize == World.Size && _config.WorldSeed == World.Seed) return true;
             Puts("Incorrect config version({0}/{1}[{2}, {3}])", _config.Version, _config.VersionConfig, _config.WorldSize, _config.WorldSeed);
             if (_config.Version > 0) Config.WriteObject(_config, false, $"{Config.Filename}.old");
-            CreateDefaultConfig();
+            return CreateDefaultConfig();
         }
 
         private void LootDump()
@@ -232,7 +248,7 @@ namespace Oxide.Plugins
             Puts("Containers: {0}", containers.Length);
             foreach (var container in containers)
             {
-                Puts("Container: {0} {1} {2}", container.name, container.LookupPrefabName(), container.GetInstanceID());
+                Puts("Container: {0} {1} {2}", container.name, container.PrefabName, container.GetInstanceID());
                 Puts("Loot: {0} {1}", container.lootDefinition.name, container.lootDefinition.GetInstanceID());
             }
         }
@@ -275,15 +291,15 @@ namespace Oxide.Plugins
             Puts("LootContainer: {0} LootSpawn: {1} ItemModReveal: {2}", lootContainers.Length, lootSpawnsOld.Length, itemModReveals.Length);
 #endif
             var spawnGroups = (List<SpawnGroup>)SpawnGroupsField.GetValue(SpawnHandler.Instance);
-            var spawnGroupsEnabled = !spawnGroups.Any(spawnGroup => spawnGroup.prefabs.Any(entry => GameManager.server.FindPrefab(entry.prefab.Get().GetComponent<LootContainer>().LookupPrefabName()) == entry.prefab.Get()));
+            var spawnGroupsEnabled = !spawnGroups.Any(spawnGroup => spawnGroup.prefabs.Any(entry => GameManager.server.FindPrefab(entry.prefab.Get().GetComponent<BaseNetworkable>().PrefabName) == entry.prefab.Get()));
             var lootSpawns = new Dictionary<string, LootSpawn>();
             var indexes = GetSpawnGroupIndexes(spawnGroups, monuments);
             foreach (var lootContainer in lootContainers)
             {
 #if DEBUG
-                Puts("Update LootContainer: {0} {1} {2}", lootContainer.name, lootContainer.LookupPrefabName(), lootContainer.GetInstanceID());
+                Puts("Update LootContainer: {0} {1} {2}", lootContainer.name, lootContainer.PrefabName, lootContainer.GetInstanceID());
 #endif
-                if (GameManager.server.FindPrefab(lootContainer.LookupPrefabName()) != lootContainer.gameObject)
+                if (GameManager.server.FindPrefab(lootContainer.PrefabName) != lootContainer.gameObject)
                 {
                     if (lootContainer.GetComponent<SpawnPointInstance>() != null)
                     {
@@ -305,11 +321,11 @@ namespace Oxide.Plugins
                     }
                     if (lootContainer.GetComponent<Spawnable>() == null)
                     {
-                        if (lootContainer.name.Equals(lootContainer.LookupPrefabName()) || lootContainer.name.Equals(Core.Utility.GetFileNameWithoutExtension(lootContainer.LookupPrefabName())))
+                        if (lootContainer.name.Equals(lootContainer.PrefabName) || lootContainer.name.Equals(Core.Utility.GetFileNameWithoutExtension(lootContainer.PrefabName)))
                         {
 #if DEBUG
                             var components = lootContainer.GetComponents<MonoBehaviour>();
-                            Puts("Name: {0} Identical: {1}\tActiveP: {2}\tActiveC: {3}", lootContainer.name, GameManager.server.FindPrefab(lootContainer.LookupPrefabName()) == lootContainer.gameObject, GameManager.server.FindPrefab(lootContainer.LookupPrefabName()).activeInHierarchy, lootContainer.gameObject.activeInHierarchy);
+                            Puts("Name: {0} Identical: {1}\tActiveP: {2}\tActiveC: {3}", lootContainer.name, GameManager.server.FindPrefab(lootContainer.PrefabName) == lootContainer.gameObject, GameManager.server.FindPrefab(lootContainer.PrefabName).activeInHierarchy, lootContainer.gameObject.activeInHierarchy);
                             Puts("Components: {0}", string.Join(",", components.Select(c => c.GetType().FullName).ToArray()));
                             Puts("Position: {0}", lootContainer.transform.position);
 #endif
@@ -324,6 +340,12 @@ namespace Oxide.Plugins
             {
                 foreach (var spawnGroup in spawnGroups)
                 {
+                    var shouldEmpty = false;
+                    foreach (var entry in spawnGroup.prefabs)
+                        if (entry.prefab.Get().GetComponent<LootContainer>()?.lootDefinition != null)
+                            shouldEmpty = true;
+                    if (!shouldEmpty)
+                        continue;
                     Dictionary<string, LootContainerData> spawnGroupData;
                     if (!_config.SpawnGroups.TryGetValue(GetSpawnGroupKey(spawnGroup, monuments, indexes), out spawnGroupData))
                     {
@@ -386,10 +408,11 @@ namespace Oxide.Plugins
 
         private void UpdateLootContainer(Dictionary<string, LootContainerData> containerData, LootContainer container, Dictionary<string, LootSpawn> lootSpawns)
         {
+            if (container == null) return;
             LootContainerData containerConfig;
-            if (containerData == null || !containerData.TryGetValue(container.LookupPrefabName(), out containerConfig))
+            if (containerData == null || !containerData.TryGetValue(container.PrefabName, out containerConfig))
             {
-                Puts("No container data found: {0}", container.LookupPrefabName());
+                Puts("No container data found: {0}", container.PrefabName);
                 return;
             }
             container.maxDefinitionsToSpawn = containerConfig.MaxDefinitionsToSpawn;
@@ -418,7 +441,7 @@ namespace Oxide.Plugins
             }
             lootSpawns[lootSpawnName] = lootSpawn = ScriptableObject.CreateInstance<LootSpawn>();
             lootSpawn.name = lootSpawnName;
-            lootSpawn.items = new ItemAmount[lootSpawnData.Items.Length];
+            lootSpawn.items = new ItemAmountRanged[lootSpawnData.Items.Length];
             lootSpawn.subSpawn = new LootSpawn.Entry[lootSpawnData.SubSpawn.Length];
             FillItemAmount(lootSpawn.items, lootSpawnData.Items, lootSpawnName);
             for (var i = 0; i < lootSpawnData.SubSpawn.Length; i++)
@@ -430,11 +453,11 @@ namespace Oxide.Plugins
             return lootSpawn;
         }
 
-        private void FillItemAmount(ItemAmount[] amounts, ItemAmountData[] amountDatas, string parent)
+        private void FillItemAmount(ItemAmountRanged[] amounts, ItemAmountRangedData[] amountRangedDatas, string parent)
         {
-            for (var i = 0; i < amountDatas.Length; i++)
+            for (var i = 0; i < amountRangedDatas.Length; i++)
             {
-                var itemAmountData = amountDatas[i];
+                var itemAmountData = amountRangedDatas[i];
                 var def = GetItem(itemAmountData.Shortname);
                 if (def == null)
                 {
@@ -446,7 +469,7 @@ namespace Oxide.Plugins
                     Puts("Item amount too low: {0} for: {1}", itemAmountData.Shortname, parent);
                     continue;
                 }
-                amounts[i] = new ItemAmount(def, itemAmountData.Amount);
+                amounts[i] = new ItemAmountRanged(def, itemAmountData.Amount);
             }
         }
 
@@ -468,6 +491,8 @@ namespace Oxide.Plugins
 
         private string GetSpawnGroupKey(SpawnGroup spawnGroup, MonumentInfo[] monuments, Dictionary<SpawnGroup, int> indexes)
         {
+            if (!indexes.ContainsKey(spawnGroup))
+                return "unkown";
             var index = indexes[spawnGroup];
             return $"{GetSpawnGroupId(spawnGroup, monuments)}{(index > 0 ? $"_{index}" : string.Empty)}";
         }
@@ -569,20 +594,23 @@ namespace Oxide.Plugins
 
         #endregion
 
-        #region Nested type: ItemAmountConverter
+        #region Nested type: ItemAmountRangedConverter
 
-        private class ItemAmountConverter : JsonConverter
+        private class ItemAmountRangedConverter : JsonConverter
         {
             public override bool CanRead => false;
 
             public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
             {
-                var itemAmount = (ItemAmount) value;
+                var itemAmount = (ItemAmountRanged) value;
+                if (itemAmount.itemDef == null) return;
                 writer.WriteStartObject();
                 writer.WritePropertyName("Shortname");
                 writer.WriteValue(itemAmount.itemDef.shortname);
                 writer.WritePropertyName("Amount");
                 writer.WriteValue(itemAmount.amount);
+                writer.WritePropertyName("MaxAmount");
+                writer.WriteValue(itemAmount.maxAmount);
                 writer.WriteEndObject();
             }
 
@@ -593,18 +621,19 @@ namespace Oxide.Plugins
 
             public override bool CanConvert(Type objectType)
             {
-                return typeof (ItemAmount).IsAssignableFrom(objectType);
+                return typeof (ItemAmountRanged).IsAssignableFrom(objectType);
             }
         }
 
         #endregion
 
-        #region Nested type: ItemAmountData
+        #region Nested type: ItemAmountRangedData
 
-        public class ItemAmountData
+        public class ItemAmountRangedData
         {
             public string Shortname { get; set; }
             public float Amount { get; set; }
+            public float MaxAmount { get; set; }
         }
 
         #endregion
@@ -786,7 +815,7 @@ namespace Oxide.Plugins
 
         public class LootSpawnData
         {
-            public ItemAmountData[] Items { get; set; } = new ItemAmountData[0];
+            public ItemAmountRangedData[] Items { get; set; } = new ItemAmountRangedData[0];
             public LootSpawnEntryData[] SubSpawn { get; set; } = new LootSpawnEntryData[0];
         }
 

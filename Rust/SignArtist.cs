@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-
+using System.IO;
 using Oxide.Core;
 
 using UnityEngine;
@@ -9,7 +9,7 @@ using UnityEngine;
 namespace Oxide.Plugins
 {
 
-    [Info("Sign Artist", "Bombardir", "0.3.1", ResourceId = 992)]
+    [Info("Sign Artist", "Bombardir", "0.3.2", ResourceId = 992)]
     class SignArtist : RustPlugin
     {
         GameObject WebObject;
@@ -39,6 +39,7 @@ namespace Oxide.Plugins
             private Queue<QueueItem> QueueList = new Queue<QueueItem>();
             private byte ActiveLoads;
             private SignArtist SignArtist;
+            private MemoryStream stream = new MemoryStream();
 
             private void Awake()
             {
@@ -49,6 +50,7 @@ namespace Oxide.Plugins
             {
                 QueueList.Clear();
                 SignArtist = null;
+                stream.Dispose();
             }
 
             public void Add(string url, BasePlayer player, Signage s, bool raw)
@@ -76,6 +78,12 @@ namespace Oxide.Plugins
                 //player.ChatMessage(tex.format + " - " + tex + " - " + tex.EncodeToPNG().Length + " - " + tex.GetRawTextureData().Length + " - " + tex.EncodeToJPG(SignArtist.JPGCompression).Length);
                 DestroyImmediate(tex);
                 return img;
+            }
+
+            private void ClearStream()
+            {
+                stream.Position = 0;
+                stream.SetLength(0);
             }
 
             IEnumerator WaitForRequest(QueueItem info)
@@ -107,7 +115,10 @@ namespace Oxide.Plugins
                             var sign = info.sign;
                             if (sign.textureID > 0U)
                                 FileStorage.server.Remove(sign.textureID, FileStorage.Type.png, sign.net.ID);
-                            sign.textureID = FileStorage.server.Store(img, FileStorage.Type.png, sign.net.ID);
+                            ClearStream();
+                            stream.Write(img, 0, img.Length);
+                            sign.textureID = FileStorage.server.Store(stream, FileStorage.Type.png, sign.net.ID);
+                            ClearStream();
                             sign.SendNetworkUpdate();
                             Interface.Oxide.CallHook("OnSignUpdated", sign, player);
                             player.ChatMessage(SignArtist.Loaded);

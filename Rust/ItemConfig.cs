@@ -1,4 +1,5 @@
 ﻿//Reference: Newtonsoft.Json
+//Reference: Rust.Global
 
 using System.Collections.Generic;
 using System.Linq;
@@ -9,9 +10,10 @@ using UnityEngine;
 
 using System;
 using System.IO;
-using System.Reflection;
 
 using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
 
 using JSONObject = JSON.Object;
@@ -21,10 +23,10 @@ using JSONValueType = JSON.ValueType;
 
 namespace Oxide.Plugins
 {
-    [Info("ItemConfig", "Nogrod", "1.0.31", ResourceId = 806)]
+    [Info("ItemConfig", "Nogrod", "1.0.36", ResourceId = 806)]
     class ItemConfig : RustPlugin
     {
-        private const int VersionConfig = 8;
+        private const int VersionConfig = 9;
         private string _configpath = "";
         private bool _craftingController;
         private bool _stackSizes;
@@ -35,10 +37,8 @@ namespace Oxide.Plugins
         {
             ContractResolver = new DynamicContractResolver(),
             ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
-            Converters = new List<JsonConverter> {new Newtonsoft.Json.Converters.StringEnumConverter()}
+            Converters = new List<JsonConverter> {new UnityEnumConverter()}
         };
-
-        private readonly FieldInfo PrefabPropertiesField = typeof(ItemModWearable).GetField("prefabProperties", BindingFlags.NonPublic | BindingFlags.Instance);
 
         void Loaded()
         {
@@ -101,8 +101,12 @@ namespace Oxide.Plugins
             var items = new JSONArray();
             foreach (var definition in itemList)
             {
+                //Puts("Item: {0}", definition.displayName.english);
                 var obj = ToJsonObject(definition);
                 obj.Remove("itemid");
+                obj.Remove("hidden");
+                obj.Remove("isWearable");
+                obj["Parent"] = definition.Parent?.shortname;
                 obj["displayName"] = definition.displayName.english;
                 obj["displayDescription"] = definition.displayDescription.english;
                 var mods = definition.GetComponentsInChildren<ItemMod>(true);
@@ -112,6 +116,7 @@ namespace Oxide.Plugins
                     if (itemMod.GetType() == typeof (ItemModMenuOption) || itemMod.GetType() == typeof(ItemModConditionHasFlag) || itemMod.GetType() == typeof(ItemModConditionContainerFlag)
                         || itemMod.GetType() == typeof(ItemModSwitchFlag) || itemMod.GetType() == typeof(ItemModCycle) || itemMod.GetType() == typeof(ItemModConditionHasContents)
                         || itemMod.GetType() == typeof(ItemModUseContent) || itemMod.GetType() == typeof(ItemModEntity) || itemMod.GetType() == typeof(ItemModUnwrap)) continue;
+                    //Puts("ItemMod: {0}", itemMod.GetType());
                     var mod = ToJsonObject(itemMod);
                     if (itemMod.GetType() == typeof(ItemModBurnable))
                     {
@@ -161,29 +166,26 @@ namespace Oxide.Plugins
                     else if (itemMod.GetType() == typeof(ItemModWearable))
                     {
                         var itemModWearable = itemMod.GetComponent<ItemModWearable>();
-                        var prefabProperties = (GameManifest.PrefabProperties)PrefabPropertiesField.GetValue(itemModWearable);
-                        if (prefabProperties?.protections != null)
+                        if (itemModWearable.protectionProperties != null)
                         {
-                            var protectionArray = new JSONArray();
-                            foreach (var protection in prefabProperties.protections)
+                            var protectionObj = new JSONObject
                             {
-                                var protectionObj = new JSONObject
-                                {
-                                    ["name"] = protection.name,
-                                    ["density"] = protection.density
-                                };
-                                var amounts = new JSONObject();
-                                for (var i = 0; i < protection.amounts.Length; i++)
-                                {
-                                    amounts[((DamageType)i).ToString()] = protection.amounts[i];
-                                }
-                                protectionObj["amounts"] = amounts;
-                                protectionArray.Add(protectionObj);
-                            }
-                            mod["protections"] = protectionArray;
+                                ["density"] = itemModWearable.protectionProperties.density
+                            };
+                            var amounts = new JSONObject();
+                            for (var i = 0; i < itemModWearable.protectionProperties.amounts.Length; i++)
+                                amounts[((DamageType) i).ToString()] = itemModWearable.protectionProperties.amounts[i];
+                            protectionObj["amounts"] = amounts;
+                            mod["protection"] = protectionObj;
                         }
-                        mod.GetObject("targetWearable").Remove("showCensorshipCube");
-                        mod.GetObject("targetWearable").Remove("followBone");
+                        if (itemModWearable.armorProperties != null)
+                            mod["armor"] = FromJsonString<string>(ToJsonString((HitAreaUnity) itemModWearable.armorProperties.area));
+                        var targetWearable = mod.GetObject("targetWearable");
+                        targetWearable.Remove("showCensorshipCube");
+                        targetWearable.Remove("showCensorshipCubeBreasts");
+                        targetWearable.Remove("followBone");
+                        targetWearable["occupationOver"] = FromJsonString<string>(ToJsonString((OccupationSlotsUnity)itemModWearable.targetWearable.occupationOver));
+                        targetWearable["occupationUnder"] = FromJsonString<string>(ToJsonString((OccupationSlotsUnity)itemModWearable.targetWearable.occupationUnder));
                     }
                     if (!mod.Any()) continue;
                     mod["type"] = itemMod.GetType().FullName;
@@ -199,9 +201,7 @@ namespace Oxide.Plugins
                         var mod = ToJsonObject(timedExplosive);
                         mod["type"] = modEntity.GetType().FullName + timedExplosive.GetType().FullName;
                         if (timedExplosive is DudTimedExplosive)
-                        {
                             mod.Remove("itemToGive");
-                        }
                         modArray.Add(mod);
                     }
                     var modMelee = prefab?.GetComponent<BaseMelee>();
@@ -283,6 +283,7 @@ namespace Oxide.Plugins
 
                 items.Add(obj);
             }
+
             Config["Items"] = JsonObjectToObject(items);
             var bps = ToJsonArray(bpList);
             foreach (var bp in bps)
@@ -374,7 +375,7 @@ namespace Oxide.Plugins
         {
             _itemsDict = ItemManager.itemList.ToDictionary(i => i.shortname);
             _bpsDict = ItemManager.bpList.ToDictionary(i => i.targetItem.shortname);
-            Puts(string.Join(", ", _bpsDict.Keys.ToArray()));
+            //Puts(string.Join(", ", _bpsDict.Keys.ToArray()));
             var items = Config["Items"] as List<object>;
             if (items == null)
             {
@@ -425,7 +426,7 @@ namespace Oxide.Plugins
                 }
                 UpdateBlueprint(bp, value.Obj);
             }
-            ItemManager.defaultBlueprints = ItemManager.bpList.Where(x => x.defaultBlueprint).Select(x => x.targetItem.itemid).ToArray();
+            ItemManager.defaultBlueprints = (from x in ItemManager.bpList where !x.NeedsSteamItem select x.targetItem.itemid).ToArray();
             _itemsDict = null;
             _bpsDict = null;
         }
@@ -435,8 +436,9 @@ namespace Oxide.Plugins
             bp.rarity = GetRarity(o);
             if (!_craftingController) bp.time = o.GetFloat("time", 0);
             bp.amountToCreate = o.GetInt("amountToCreate", 1);
-            bp.UnlockPrice = o.GetInt("UnlockPrice", 0);
-            bp.UnlockLevel = o.GetInt("UnlockLevel", 10);
+            //bp.UnlockPrice = o.GetInt("UnlockPrice", 0);
+            //bp.UnlockLevel = o.GetInt("UnlockLevel", 10);
+            bp.blueprintStackSize = o.GetInt("blueprintStackSize");
             //bp.userCraftable = o.GetBoolean("userCraftable", true);
             bp.isResearchable = o.GetBoolean("isResearchable", true);
             bp.NeedsSteamItem = o.GetBoolean("NeedsSteamItem", false);
@@ -461,6 +463,7 @@ namespace Oxide.Plugins
             definition.condition.max = condition.GetFloat("max", 0);
             definition.condition.repairable = condition.GetBoolean("repairable", false);
             definition.rarity = GetRarity(item);
+            definition.Parent = GetItem(item, "Parent");
             var modules = item.GetArray("modules").Select(m => m.Obj);
             foreach (var mod in modules)
             {
@@ -569,8 +572,9 @@ namespace Oxide.Plugins
                     projectile.thickness = mod.GetFloat("thickness", 0);
                     projectile.remainInWorld = mod.GetBoolean("remainInWorld", false);
                     projectile.breakProbability = mod.GetFloat("breakProbability", 0);
+                    projectile.stickProbability = mod.GetFloat("stickProbability", 1f);
                     projectile.ricochetChance = mod.GetFloat("ricochetChance", 0);
-                    projectile.fullDamageVelocity = mod.GetFloat("fullDamageVelocity", 200);
+                    projectile.penetrationPower = mod.GetFloat("penetrationPower", 1f);
                     UpdateDamageTypes(mod.GetArray("damageTypes"), projectile.damageTypes);
                     var spawn = itemMod as ItemModProjectileSpawn;
                     if (spawn != null)
@@ -661,26 +665,17 @@ namespace Oxide.Plugins
                     var itemMod = definition.GetComponent<ItemModWearable>();
                     itemMod.targetWearable.occupationOver = GetOccupationSlot(mod.GetObject("targetWearable").GetValue("occupationOver"));
                     itemMod.targetWearable.occupationUnder = GetOccupationSlot(mod.GetObject("targetWearable").GetValue("occupationUnder"));
-                    var prefabProperties = (GameManifest.PrefabProperties)PrefabPropertiesField.GetValue(itemMod);
-                    if (prefabProperties?.protections == null) continue;
-                    var list = prefabProperties.protections.ToList();
-                    foreach (var protectionObj in mod.GetArray("protections").Select(protection => protection.Obj))
+                    if (itemMod?.protectionProperties != null)
                     {
-                        var entry = list.FirstOrDefault(p => p.name.Equals(protectionObj.GetString("name", "")));
-                        if (entry != null)
-                        {
-                            entry.density = protectionObj.GetFloat("density", 1f);
-                            var amounts = protectionObj.GetObject("amounts");
-                            foreach (var amount in amounts)
-                            {
-                                entry.amounts[(int)Enum.Parse(typeof(DamageType), amount.Key)] = (float)amount.Value.Number;
-                            }
-                        }
-                        else
-                        {
-                            Puts("{0}", "Not found: " + protectionObj.GetString("name", ""));
-                        }
+                        var protectionObj = mod.GetObject("protection");
+                        var entry = itemMod.protectionProperties;
+                        entry.density = protectionObj.GetFloat("density", 1f);
+                        var amounts = protectionObj.GetObject("amounts");
+                        foreach (var amount in amounts)
+                            entry.amounts[(int) Enum.Parse(typeof(DamageType), amount.Key)] = (float) amount.Value.Number;
                     }
+                    if (itemMod?.armorProperties != null)
+                        itemMod.armorProperties.area = (HitArea) Enum.Parse(typeof(HitAreaUnity), mod.GetString("armor"), true);
                 }
                 else if (typeName.Equals("ItemModAlterCondition"))
                 {
@@ -729,7 +724,7 @@ namespace Oxide.Plugins
         {
             if (value.Type == JSONValueType.String && !string.IsNullOrEmpty(value.Str))
             {
-                return JsonConvert.DeserializeObject<Wearable.OccupationSlots>(@"""" + value.Str + @"""", new Newtonsoft.Json.Converters.StringEnumConverter());
+                return (Wearable.OccupationSlots)JsonConvert.DeserializeObject<OccupationSlotsUnity>(@"""" + value.Str + @"""", new UnityEnumConverter());
             }
             return 0;
         }
@@ -842,6 +837,46 @@ namespace Oxide.Plugins
             UpdateItems();
         }
 
+        [Flags]
+        enum OccupationSlotsUnity
+        {
+            Everything = -1,
+            Nothing = 0,
+            HeadTop = 1,
+            Face = 2,
+            HeadBack = 4,
+            TorsoFront = 8,
+            TorsoBack = 16,
+            LeftShoulder = 32,
+            RightShoulder = 64,
+            LeftArm = 128,
+            RightArm = 256,
+            LeftHand = 512,
+            RightHand = 1024,
+            Groin = 2048,
+            Bum = 4096,
+            LeftKnee = 8192,
+            RightKnee = 16384,
+            LeftLeg = 32768,
+            RightLeg = 65536,
+            LeftFoot = 131072,
+            RightFoot = 262144
+        }
+
+        [Flags]
+        enum HitAreaUnity
+        {
+            Everything = -1,
+            Nothing = 0,
+            Head = 1,
+            Chest = 2,
+            Stomach = 4,
+            Arm = 8,
+            Hand = 16,
+            Leg = 32,
+            Foot = 64
+        }
+
         class DynamicContractResolver : DefaultContractResolver
         {
             private static bool IsAllowed(JsonProperty property)
@@ -856,9 +891,11 @@ namespace Oxide.Plugins
                              property.PropertyType == typeof(MetabolismAttribute.Type) ||
                              property.PropertyType == typeof(Rarity) ||
                              property.PropertyType == typeof(ItemCategory) ||
+                             property.PropertyType == typeof(HitAreaUnity) ||
                              property.PropertyType == typeof(ItemDefinition) ||
                              property.PropertyType == typeof(ItemDefinition.Condition) ||
                              property.PropertyType == typeof(Wearable) ||
+                             property.PropertyType == typeof(MinMax) ||
                              property.PropertyType == typeof(Wearable.OccupationSlots) ||
                              property.PropertyType == typeof(ResourceDispenser.GatherProperties) ||
                              property.PropertyType == typeof(ResourceDispenser.GatherPropertyEntry) ||
@@ -871,5 +908,68 @@ namespace Oxide.Plugins
                 return properties.Where(p => (p.DeclaringType == type || p.DeclaringType == typeof(TimedExplosive) || p.DeclaringType == typeof(BaseMelee)) && IsAllowed(p)).ToList();
             }
         }
+
+        private class UnityEnumConverter : StringEnumConverter
+        {
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+            {
+                if (value == null || ((Enum)value).ToString("G")[0] != '-')
+                {
+                    base.WriteJson(writer, value, serializer);
+                    return;
+                }
+                var objectType = value.GetType();
+                var isNullable = (objectType.IsGenericType && objectType.GetGenericTypeDefinition() == typeof(Nullable<>));
+                var t = isNullable ? Nullable.GetUnderlyingType(objectType) : objectType;
+                if (!Enum.IsDefined(t, -1))
+                {
+                    base.WriteJson(writer, value, serializer);
+                    return;
+                }
+                var everything = Enum.GetName(t, -1);
+                var tmp = new JTokenWriter();
+                base.WriteJson(tmp, Enum.ToObject(t, ~(int)value), serializer);
+                var result = tmp.Token.Value<string>();
+                var values = new List<string> { everything };
+                if (result.IndexOf(',') != -1)
+                {
+                    var names = result.Split(',');
+                    for (var i = 0; i < names.Length; i++)
+                        names[i] = names[i].Trim();
+                    values.AddRange(names);
+                }
+                else
+                    values.Add(result);
+                writer.WriteValue(string.Join(", ", values.ToArray()));
+            }
+
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+            {
+                if (reader.TokenType != JsonToken.String || reader.Value.ToString().IndexOf(',') == -1) return base.ReadJson(reader, objectType, existingValue, serializer);
+                var enumText = reader.Value.ToString();
+                var isNullable = (objectType.IsGenericType && objectType.GetGenericTypeDefinition() == typeof(Nullable<>));
+                var t = isNullable ? Nullable.GetUnderlyingType(objectType) : objectType;
+                if (!Enum.IsDefined(t, -1))
+                    return base.ReadJson(reader, objectType, existingValue, serializer);
+                var everything = Enum.GetName(t, -1);
+                var inverted = false;
+                var names = enumText.Split(',');
+                for (var i = 0; i < names.Length; i++)
+                {
+                    names[i] = names[i].Trim();
+                    if (!names[i].Equals(everything, StringComparison.OrdinalIgnoreCase)) continue;
+                    names[i] = null;
+                    inverted = true;
+                }
+                names = names.Where(n => n != null).ToArray();
+
+                enumText = string.Join(", ", names);
+                reader = new JTokenReader(new JValue(enumText));
+                reader.Read();
+                var result = base.ReadJson(reader, objectType, existingValue, serializer);
+                return inverted ? ~(int)result : result;
+            }
+        }
+
     }
 }
