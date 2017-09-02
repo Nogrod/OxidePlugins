@@ -18,17 +18,19 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("SpawnConfig", "Nogrod", "1.0.11")]
+    [Info("SpawnConfig", "Nogrod", "1.0.13")]
     internal class SpawnConfig : RustPlugin
     {
         private const bool Debug = false;
-        private const int VersionConfig = 6;
-        private readonly FieldInfo PrefabsField = typeof (SpawnPopulation).GetField("Prefabs", BindingFlags.Instance | BindingFlags.NonPublic);
+        private const int VersionConfig = 7;
+        private readonly FieldInfo PrefabsField = typeof(SpawnPopulation).GetField("Prefabs", BindingFlags.Instance | BindingFlags.NonPublic);
+        private readonly FieldInfo _targetDensityField = typeof(SpawnPopulation).GetField("_targetDensity", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo toStringField = typeof(StringPool).GetField("toString", BindingFlags.Static | BindingFlags.NonPublic);
         private readonly FieldInfo toNumberField = typeof(StringPool).GetField("toNumber", BindingFlags.Static | BindingFlags.NonPublic);
         private readonly FieldInfo guidToPathField = typeof(GameManifest).GetField("guidToPath", BindingFlags.Static | BindingFlags.NonPublic);
         private readonly FieldInfo guidToObjectField = typeof(GameManifest).GetField("guidToObject", BindingFlags.Static | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnDistributionsField = typeof(SpawnHandler).GetField("SpawnDistributions", BindingFlags.Instance | BindingFlags.NonPublic);
+        private readonly FieldInfo AllSpawnPopulationsField = typeof(SpawnHandler).GetField("AllSpawnPopulations", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnGroupsField = typeof (SpawnHandler).GetField("SpawnGroups", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnPointsField = typeof (SpawnGroup).GetField("spawnPoints", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly JsonSerializerSettings Settings = new JsonSerializerSettings
@@ -104,7 +106,8 @@ namespace Oxide.Plugins
                 WorldSize = World.Size,
                 WorldSeed = World.Seed
             };
-            foreach (var population in SpawnHandler.Instance.SpawnPopulations)
+            var AllSpawnPopulations = (SpawnPopulation[])AllSpawnPopulationsField.GetValue(SpawnHandler.Instance);
+            foreach (var population in AllSpawnPopulations)
             {
                 var data = ToJsonString(population);
                 //if ((int)population.Filter.BiomeType < 0)
@@ -184,7 +187,8 @@ namespace Oxide.Plugins
             if (SpawnHandler.Instance == null) return;
             var stringBuilder = new StringBuilder();
             var SpawnDistributions = (SpawnDistribution[])SpawnDistributionsField.GetValue(SpawnHandler.Instance);
-            if (SpawnHandler.Instance.SpawnPopulations == null)
+            var AllSpawnPopulations = (SpawnPopulation[])AllSpawnPopulationsField.GetValue(SpawnHandler.Instance);
+            if (AllSpawnPopulations == null)
                 stringBuilder.AppendLine("Spawn population array is null.");
             if (SpawnDistributions == null)
                 stringBuilder.AppendLine("Spawn distribution array is null.");
@@ -205,11 +209,11 @@ namespace Oxide.Plugins
             }
             stringBuilder.AppendLine("Containers: " + containers.Count);
             stringBuilder.AppendLine("Containers(global): " + Resources.FindObjectsOfTypeAll<LootContainer>().Length);
-            if (SpawnHandler.Instance.SpawnPopulations != null && SpawnDistributions != null)
+            if (AllSpawnPopulations != null && SpawnDistributions != null)
             {
-                for (var i = 0; i < SpawnHandler.Instance.SpawnPopulations.Length; i++)
+                for (var i = 0; i < AllSpawnPopulations.Length; i++)
                 {
-                    var spawnPopulations = SpawnHandler.Instance.SpawnPopulations[i];
+                    var spawnPopulations = AllSpawnPopulations[i];
                     var spawnDistributions = SpawnDistributions[i];
                     if (spawnPopulations == null)
                         stringBuilder.AppendLine($"Population #{i} is not set.");
@@ -236,7 +240,7 @@ namespace Oxide.Plugins
                             stringBuilder.AppendLine($"\tDistribution #{i} is not set.");
                         else
                         {
-                            var currentCount = SpawnHandler.Instance.GetCurrentCount(spawnPopulations);
+                            var currentCount = SpawnHandler.Instance.GetCurrentCount(spawnPopulations, spawnDistributions);
                             var targetCount = SpawnHandler.Instance.GetTargetCount(spawnPopulations, spawnDistributions);
                             stringBuilder.AppendLine($"\tPopulation: {currentCount}/{targetCount} Scale: {spawnPopulations.ScaleWithServerPopulation}");
                             stringBuilder.AppendLine($"TerrainMeta X: {TerrainMeta.Size.x} Y: {TerrainMeta.Size.z} Density: {densityField.GetValue(spawnDistributions)} CurrentSpawnDensity: {spawnPopulations.GetCurrentSpawnDensity()}");
@@ -253,7 +257,8 @@ namespace Oxide.Plugins
         private void UpdateSpawns()
         {
             //Puts("Found {0} SpawnPopulations in config.", _config.SpawnPopulations.Count);
-            foreach (var spawnPopulation in SpawnHandler.Instance.SpawnPopulations)
+            var AllSpawnPopulations = (SpawnPopulation[])AllSpawnPopulationsField.GetValue(SpawnHandler.Instance);
+            foreach (var spawnPopulation in AllSpawnPopulations)
             {
                 SpawnPopulationData spawnPopulationData;
                 if (!_config.SpawnPopulations.TryGetValue(spawnPopulation.name, out spawnPopulationData))
@@ -284,7 +289,7 @@ namespace Oxide.Plugins
                 spawnPopulation.ScaleWithSpawnFilter = spawnPopulationData.ScaleWithSpawnFilter;
                 spawnPopulation.ScaleWithServerPopulation = spawnPopulationData.ScaleWithServerPopulation;
                 spawnPopulation.SpawnRate = spawnPopulationData.SpawnRate;
-                spawnPopulation.TargetDensity = spawnPopulationData.TargetDensity;
+                _targetDensityField.SetValue(spawnPopulation, spawnPopulationData.TargetDensity);
                 spawnPopulation.Filter = spawnPopulationData.Filter.ToSpawnFilter();
                 //Puts(spawnPopulation.name + ToJsonString(spawnPopulationData.Filter, false));
                 //Puts(spawnPopulation.name + ToJsonString(SpawnFilterData.FromSpawnFilter(spawnPopulation.Filter), false));
@@ -691,7 +696,7 @@ namespace Oxide.Plugins
             public float RespawnDelayMin { get; set; } = 10f;
             public float RespawnDelayMax { get; set; } = 20f;
             public bool WantsInitialSpawn { get; set; } = true;
-            public bool Temporary { get; set; };
+            public bool Temporary { get; set; }
             public List<SpawnEntryData> Prefabs { get; set; } = new List<SpawnEntryData>();
             public Dictionary<string, SpawnPointData> SpawnPoints { get; set; } = new Dictionary<string, SpawnPointData>();
         }

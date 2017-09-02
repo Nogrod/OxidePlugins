@@ -26,7 +26,7 @@ using Timer = Oxide.Plugins.Timer;
 namespace Oxide.Plugins
 {
 
-    [Info("Hunt RPG", "PedraozauM / SW / Nogrod", "1.5.9", ResourceId = 841)]
+    [Info("Hunt RPG", "PedraozauM / SW / Nogrod", "1.5.13", ResourceId = 841)]
     public class HuntPlugin : RustPlugin
     {
         [PluginReference]
@@ -176,7 +176,7 @@ namespace Oxide.Plugins
             var playerCooldowns = PlayerCooldowns(player.userID);
             float availableAt = 0;
             var time = Time.realtimeSinceStartup;
-            var isReady = /*player.IsAdmin() || */IsSkillReady(playerCooldowns, ref availableAt, time, HRK.Blinkarrow);
+            var isReady = /*player.IsAdmin || */IsSkillReady(playerCooldowns, ref availableAt, time, HRK.Blinkarrow);
             if (isReady)
             {
                 if (rpgInfo.Preferences.AutoToggleBlinkArrow)
@@ -441,7 +441,7 @@ namespace Oxide.Plugins
         private bool OnAttackedInternal(BasePlayer player, HitInfo hitInfo)
         {
             var attacker = hitInfo.Initiator as BasePlayer;
-            if (!(hitInfo.Initiator is BaseNPC || attacker != null && player.userID != attacker.userID)) return false;
+            if (!(hitInfo.Initiator is BaseNpc || attacker != null && player.userID != attacker.userID)) return false;
             var rpgInfo = FindRpgInfo(player);
             if (Random.Range(0f, 1f) <= rpgInfo.GetEvasion())
             {
@@ -484,7 +484,7 @@ namespace Oxide.Plugins
         [ChatCommand("hgui")]
         void cmdHuntGui(BasePlayer player, string command, string[] args)
         {
-            if (Trainer.Length > 0 && !player.IsAdmin()) return;
+            if (Trainer.Length > 0 && !player.IsAdmin) return;
             ProfileGui(player);
         }
 
@@ -721,7 +721,7 @@ namespace Oxide.Plugins
                     PopupNotifications?.Call("CreatePopupNotification", _(msgType, player), player);
                     return;
             }
-            if (Trainer.Length > 0 && !IsNPCInRange(player.transform.position) && !player.IsAdmin())
+            if (Trainer.Length > 0 && !IsNPCInRange(player.transform.position) && !player.IsAdmin)
             {
                 ChatMessage(player, HMK.NeedNpc);
                 return;
@@ -729,7 +729,7 @@ namespace Oxide.Plugins
             switch (cmdArg)
             {
                 case "lvlreset":
-                    if (AdminReset && !player.IsAdmin())
+                    if (AdminReset && !player.IsAdmin)
                     {
                         ChatMessage(player, HMK.NotAnAdmin);
                         return;
@@ -742,7 +742,7 @@ namespace Oxide.Plugins
                     SetStatsCommand(player, args, rpgInfo, npc);
                     return;
                 case "statreset":
-                    if (AdminReset && !player.IsAdmin())
+                    if (AdminReset && !player.IsAdmin)
                     {
                         ChatMessage(player, HMK.NotAnAdmin);
                         return;
@@ -755,7 +755,7 @@ namespace Oxide.Plugins
                     SetSkillsCommand(player, args, rpgInfo, npc);
                     return;
                 case "skillreset":
-                    if (AdminReset && !player.IsAdmin())
+                    if (AdminReset && !player.IsAdmin)
                     {
                         ChatMessage(player, HMK.NotAnAdmin);
                         return;
@@ -1006,7 +1006,7 @@ namespace Oxide.Plugins
 
         private void LevelUpChatHandler(BasePlayer player, string[] args, RPGInfo rpgInfo)
         {
-            if (!player.IsAdmin()) return;
+            if (!player.IsAdmin) return;
             var commandArgs = args?.Length - 1 ?? 0;
             if (args == null || commandArgs > 2 || commandArgs < 1)
             {
@@ -1137,7 +1137,7 @@ namespace Oxide.Plugins
 
         private bool IsAdmin(ConsoleSystem.Arg arg)
         {
-            if (arg.connection == null || arg.Player().IsAdmin()) return true;
+            if (arg.Connection == null || arg.Player().IsAdmin) return true;
             arg.ReplyWith(_(HMK.NotAnAdmin, arg.Player()));
             return false;
         }
@@ -1414,7 +1414,6 @@ namespace Oxide.Plugins
                 SkillTable[HRK.Tamer].Enabled = false;
             }
             SkillTable[HRK.Researcher].Enabled = false;
-            if (DeleteProfileAfter <= 0) return;
             var now = Facepunch.Math.Epoch.Current;
             var delTime = now - 86400 * DeleteProfileAfter;
             var toRemove = new List<ulong>();
@@ -1425,7 +1424,7 @@ namespace Oxide.Plugins
                     profile.Value.LastSeen = now;
                     continue;
                 }
-                if (profile.Value.LastSeen < delTime)
+                if (DeleteProfileAfter > 0 && profile.Value.LastSeen < delTime || string.IsNullOrEmpty(profile.Value.SteamName) && profile.Value.Level <= 0)
                 {
                     toRemove.Add(profile.Key);
                     var data = Data.Furnaces.Where(pair => pair.Value == profile.Key).Select(pair => pair.Key).ToArray();
@@ -1597,7 +1596,7 @@ namespace Oxide.Plugins
                     rpgInfo.Skills.TryGetValue(skill.Key, out level);
                     elements.Add(CreateButton($"hunt.cmd skillset {skill.Key} 1", i++, heightS, 18), skillsButtons);
                 }
-                if (!AdminReset || player.IsAdmin())
+                if (!AdminReset || player.IsAdmin)
                 {
                     elements.Add(CreateButton("hunt.cmd statreset", 25, .04f, 18, _(HMK.ButtonResetStats, player), "0.2", "0.45"), guiInfo.LastMain);
                     elements.Add(CreateButton("hunt.cmd skillreset", 25, .04f, 18, _(HMK.ButtonResetSkills, player), "0.6", "0.85"), guiInfo.LastMain);
@@ -1691,7 +1690,7 @@ namespace Oxide.Plugins
                     rpgInfo.Skills.TryGetValue(skill.Key, out level);
                     elements.Add(CreateButton($"hunt.cmd skillset {skill.Key} 1", i++, height), buttonsName);
                 }
-                if (!AdminReset || player.IsAdmin())
+                if (!AdminReset || player.IsAdmin)
                 {
                     elements.Add(CreateButton("hunt.cmd statreset", i++, height, 15, "R"), buttonsName);
                     elements.Add(CreateButton("hunt.cmd skillreset", i, height, 15, "R"), buttonsName);
@@ -2038,7 +2037,6 @@ namespace Oxide.Plugins
         {
             player.MovePosition(position);
             player.ClientRPCPlayer(null, player, "ForcePositionTo", position);
-            player.TransformChanged();
             //TODO replace later
             //ForcePlayerPosition(player, position);
         }

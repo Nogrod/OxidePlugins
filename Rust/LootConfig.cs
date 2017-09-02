@@ -18,15 +18,15 @@ using UnityEngine;
 
 namespace Oxide.Plugins
 {
-    [Info("LootConfig", "Nogrod", "1.0.17")]
+    [Info("LootConfig", "Nogrod", "1.0.22")]
     internal class LootConfig : RustPlugin
     {
-        private const int VersionConfig = 9;
+        private const int VersionConfig = 11;
         private readonly FieldInfo ParentSpawnGroupField = typeof (SpawnPointInstance).GetField("parentSpawnGroup", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnGroupsField = typeof (SpawnHandler).GetField("SpawnGroups", BindingFlags.Instance | BindingFlags.NonPublic);
         private readonly FieldInfo SpawnPointsField = typeof(SpawnGroup).GetField("spawnPoints", BindingFlags.Instance | BindingFlags.NonPublic);
 
-        private readonly Regex _findLoot = new Regex(@"(crate[\-_](mine|normal)[\-_\d\w]*(food|medical)*|foodbox[\-_\d\w]*|loot[\-_](barrel|trash)[\-_\d\w]*|heli[\-_]crate[\-_\d\w]*|oil[\-_]barrel[\-_\d\w]*|supply[\-_]drop[\-_\d\w]*|trash[\-_]pile[\-_\d\w]*|/dmloot/.*|giftbox[\-_]loot|stocking[\-_](small|large)[\-_]deployed)\.prefab", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private readonly Regex _findLoot = new Regex(@"(crate[\-_](elite|mine|normal|tools)[\-_\d\w]*(food|medical)*|foodbox[\-_\d\w]*|loot[\-_](barrel|trash)[\-_\d\w]*|heli[\-_]crate[\-_\d\w]*|oil[\-_]barrel[\-_\d\w]*|supply[\-_]drop[\-_\d\w]*|trash[\-_]pile[\-_\d\w]*|/dmloot/.*|giftbox[\-_]loot|stocking[\-_](small|large)[\-_]deployed|minecart|bradley[\-_]crate[\-_\d\w]*)\.prefab", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private ConfigData _config;
         private Dictionary<string, ItemDefinition> _itemsDict;
 
@@ -55,7 +55,7 @@ namespace Oxide.Plugins
         {
             if (!LoadConfig())
                 return;
-            var allPrefabs = GameManifest.Get().pooledStrings.ToList().ConvertAll(p => p.str);
+            var allPrefabs = GameManifest.Current.pooledStrings.ToList().ConvertAll(p => p.str);
             var prefabs = allPrefabs.Where(p => _findLoot.IsMatch(p)).ToArray();
 #if DEBUG
             Puts(string.Join(Environment.NewLine, allPrefabs.ToArray()));
@@ -184,7 +184,7 @@ namespace Oxide.Plugins
                 }
             }
             var containerData = new Dictionary<string, LootContainer>();
-            var allPrefabs = GameManifest.Get().pooledStrings.ToList().ConvertAll(p => p.str).Where(p => _findLoot.IsMatch(p)).ToArray();
+            var allPrefabs = GameManifest.Current.pooledStrings.ToList().ConvertAll(p => p.str).Where(p => _findLoot.IsMatch(p)).ToArray();
             Array.Sort(allPrefabs, (a, b) => caseInsensitiveComparer.Compare(a, b));
             foreach (var strPrefab in allPrefabs)
             {
@@ -419,7 +419,6 @@ namespace Oxide.Plugins
             container.minSecondsBetweenRefresh = containerConfig.MinSecondsBetweenRefresh;
             container.maxSecondsBetweenRefresh = containerConfig.MaxSecondsBetweenRefresh;
             container.destroyOnEmpty = containerConfig.DestroyOnEmpty;
-            container.distributeFragments = containerConfig.DistributeFragments;
             container.lootDefinition = GetLootSpawn(containerConfig.LootDefinition, lootSpawns);
             container.inventorySlots = containerConfig.InventorySlots;
             container.SpawnType = containerConfig.SpawnType;
@@ -469,7 +468,7 @@ namespace Oxide.Plugins
                     Puts("Item amount too low: {0} for: {1}", itemAmountData.Shortname, parent);
                     continue;
                 }
-                amounts[i] = new ItemAmountRanged(def, itemAmountData.Amount);
+                amounts[i] = new ItemAmountRanged(def, itemAmountData.Amount, itemAmountData.MaxAmount);
             }
         }
 
@@ -633,7 +632,7 @@ namespace Oxide.Plugins
         {
             public string Shortname { get; set; }
             public float Amount { get; set; }
-            public float MaxAmount { get; set; }
+            public float MaxAmount { get; set; } = -1;
         }
 
         #endregion
@@ -741,8 +740,6 @@ namespace Oxide.Plugins
                 writer.WriteValue(container.minSecondsBetweenRefresh);
                 writer.WritePropertyName("MaxSecondsBetweenRefresh");
                 writer.WriteValue(container.maxSecondsBetweenRefresh);
-                writer.WritePropertyName("DistributeFragments");
-                writer.WriteValue(container.distributeFragments);
                 writer.WritePropertyName("InitialLootSpawn");
                 writer.WriteValue(container.initialLootSpawn);
                 writer.WritePropertyName("SpawnType");
@@ -774,7 +771,6 @@ namespace Oxide.Plugins
             public int MaxDefinitionsToSpawn { get; set; }
             public float MinSecondsBetweenRefresh { get; set; } = 3600f;
             public float MaxSecondsBetweenRefresh { get; set; } = 7200f;
-            public bool DistributeFragments { get; set; } = true;
             public LootContainer.spawnType SpawnType { get; set; }
             public int InventorySlots { get; set; }
         }
